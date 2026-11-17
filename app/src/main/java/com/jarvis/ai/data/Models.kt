@@ -6,7 +6,7 @@ import kotlinx.coroutines.flow.Flow
 data class Settings(
     val endpoint: String = "https://api.groq.com/openai/v1",
     val apiKey: String = "",
-    val model: String = "llama-3.3-70b-versatile",
+    val model: String = "openai/gpt-oss-20b",
     val voiceName: String = "",          // "" = auto (best British male voice)
     val rate: Float = 1.0f,
     val pitch: Float = 0.80f,

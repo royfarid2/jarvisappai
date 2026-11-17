@@ -6,7 +6,7 @@ OpenAI-compatible AI, hear replies in a British male voice, and control parts of
 ## Features
 - Streaming chat (SSE) with any OpenAI-compatible endpoint, conversation memory (Room), Arabic + English
   (Iraqi / Saudi dialect aware via the system prompt and `ar-IQ` / `ar-SA` speech recognition).
-- Brain: Groq (OpenAI-compatible, default `llama-3.3-70b-versatile`) - or any OpenAI-compatible endpoint.
+- Brain: Groq (OpenAI-compatible, default `openai/gpt-oss-20b`) - or any OpenAI-compatible endpoint.
 - Voice out: **Fish Audio** with the community voice model "Jarvis (MCU) J.A.R.V.I.S" (editable ID), with automatic
   fallback to Android TextToSpeech (en-GB male). Voice in: Android SpeechRecognizer. Speed/pitch/voice settings,
   replay button, stop/interrupt, waveform + listening/speaking animations, hands-free mode.

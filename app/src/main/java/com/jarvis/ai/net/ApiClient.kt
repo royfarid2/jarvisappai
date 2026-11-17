@@ -42,7 +42,11 @@ class ApiClient {
         val arr = JSONArray()
         msgs.forEach { arr.put(JSONObject().put("role", it.first).put("content", it.second)) }
         return JSONObject().put("model", s.model).put("stream", stream).put("messages", arr)
-            .apply { if (maxTokens != null) put("max_tokens", maxTokens) }.toString()
+            .apply {
+                if (maxTokens != null) put("max_tokens", maxTokens)
+                // gpt-oss models "think" first; keep it short so voice replies start fast
+                if (s.model.contains("gpt-oss") && s.endpoint.contains("groq")) put("reasoning_effort", "low")
+            }.toString()
     }
 
     fun chatStream(s: Settings, msgs: List<Pair<String, String>>): Flow<String> = flow {
