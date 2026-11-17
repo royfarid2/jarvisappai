@@ -76,7 +76,7 @@ fun SettingsScreen(vm: MainViewModel, current: Settings, onBack: () -> Unit) {
             Section("Voice")
             SwitchRow("Speak responses", "JARVIS reads replies aloud as they appear", d.autoVoice) { d = d.copy(autoVoice = it) }
             SwitchRow("Hands-free mode", "After a spoken question and answer, keep listening", d.handsFree) { d = d.copy(handsFree = it) }
-            Text("On-device voice", style = MaterialTheme.typography.titleMedium)
+            Text("Backup on-device voice", style = MaterialTheme.typography.titleMedium)
             var menu by remember { mutableStateOf(false) }
             Box {
                 OutlinedButton({ menu = true }, Modifier.fillMaxWidth()) {
@@ -97,14 +97,10 @@ fun SettingsScreen(vm: MainViewModel, current: Settings, onBack: () -> Unit) {
             }
             SliderRow("Speed", d.rate, 0.5f..1.5f) { d = d.copy(rate = it) }
             SliderRow("Pitch (lower = deeper)", d.pitch, 0.5f..1.5f) { d = d.copy(pitch = it) }
-            OutlinedButton({ vm.previewVoice(d) }, Modifier.fillMaxWidth()) { Text("Preview voice") }
 
-            SwitchRow("Premium cloud voice", "Uses your endpoint's /audio/speech (OpenAI-compatible). Falls back to on-device voice on failure.", d.cloudTts) { d = d.copy(cloudTts = it) }
-            if (d.cloudTts) {
-                OutlinedTextField(d.cloudTtsModel, { d = d.copy(cloudTtsModel = it) }, Modifier.fillMaxWidth(), label = { Text("TTS model") }, singleLine = true)
-                OutlinedTextField(d.cloudVoice, { d = d.copy(cloudVoice = it) }, Modifier.fillMaxWidth(),
-                    label = { Text("Voice name (e.g. onyx, echo, fable)") }, singleLine = true)
-            }
+            Section("JARVIS voice (Fish Audio)")
+            VoiceFields(d) { d = it }
+            OutlinedButton({ vm.previewVoice(d) }, Modifier.fillMaxWidth()) { Text("Preview JARVIS voice") }
 
             Section("Language")
             Text("Speech recognition language", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)

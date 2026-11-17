@@ -21,7 +21,7 @@ import kotlin.coroutines.resume
 /**
  * Speech output. Two engines:
  *  1. Android TextToSpeech - picks a British (en-GB) male voice, low pitch by default.
- *  2. Optional cloud TTS via the configured OpenAI-compatible /audio/speech endpoint.
+ *  2. Fish Audio cloud TTS (JARVIS voice model) when a Fish key is configured; falls back to 1 on failure.
  * Chunks are queued so speech starts while the reply is still streaming.
  */
 class TtsManager(
@@ -81,7 +81,7 @@ class TtsManager(
         if (t.isEmpty()) return
         pending.incrementAndGet()
         _speaking.value = true
-        if (settings.cloudTts && settings.endpoint.isNotBlank()) queue.trySend(t) else speakLocal(t)
+        if (settings.cloudTts && settings.fishKey.isNotBlank()) queue.trySend(t) else speakLocal(t)
     }
 
     fun stop() {

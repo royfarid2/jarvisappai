@@ -87,16 +87,32 @@ class ApiClient {
         }
     }
 
-    /** OpenAI-compatible text-to-speech. Returns an mp3 file or null on failure. */
+    /**
+     * Fish Audio text-to-speech (https://api.fish.audio/v1/tts) using the configured voice model id.
+     * Tries the configured model first, then the other S2.1 tiers (free vs paid accounts). Returns an mp3 or null.
+     */
     suspend fun speech(s: Settings, text: String, dir: File): File? = withContext(Dispatchers.IO) {
-        val body = JSONObject().put("model", s.cloudTtsModel).put("voice", s.cloudVoice)
-            .put("input", text).put("response_format", "mp3")
-            .put("speed", s.rate.toDouble().coerceIn(0.5, 1.5)).toString().toRequestBody(json)
-        http.newCall(req(s, "/audio/speech").post(body).build()).execute().use { r ->
-            if (!r.isSuccessful) return@use null
-            val f = File.createTempFile("tts", ".mp3", dir)
-            f.outputStream().use { o -> r.body!!.byteStream().copyTo(o) }
-            f
+        if (s.fishKey.isBlank()) return@withContext null
+        val body = JSONObject().put("text", text).put("format", "mp3")
+            .put("prosody", JSONObject().put("speed", s.rate.toDouble().coerceIn(0.5, 2.0)))
+            .apply { if (s.fishVoiceId.isNotBlank()) put("reference_id", s.fishVoiceId.trim()) }
+            .toString()
+        for (model in listOf(s.fishModel, "s2.1-pro-free", "s2.1-pro").filter { it.isNotBlank() }.distinct()) {
+            val req = Request.Builder().url("https://api.fish.audio/v1/tts")
+                .header("Authorization", "Bearer ${s.fishKey.trim()}")
+                .header("model", model)
+                .post(body.toRequestBody(json)).build()
+            val f = try {
+                http.newCall(req).execute().use { r ->
+                    if (!r.isSuccessful) null else {
+                        val out = File.createTempFile("tts", ".mp3", dir)
+                        out.outputStream().use { o -> r.body!!.byteStream().copyTo(o) }
+                        out
+                    }
+                }
+            } catch (e: IOException) { null }
+            if (f != null) return@withContext f
         }
+        null
     }
 }

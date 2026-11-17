@@ -75,3 +75,29 @@ fun Waveform(level: Float, modifier: Modifier = Modifier, color: Color = Cyan) {
         }
     }
 }
+
+/** Faint HUD backdrop: grid + slowly rotating rings, like Stark's interface. */
+@Composable
+fun HudBackground(modifier: Modifier = Modifier) {
+    val t = rememberInfiniteTransition(label = "hud")
+    val rot by t.animateFloat(0f, 360f, infiniteRepeatable(tween(60000, easing = LinearEasing)), label = "hudrot")
+    Canvas(modifier) {
+        val step = 36.dp.toPx()
+        var x = 0f
+        while (x < size.width) { drawLine(Cyan.copy(alpha = 0.035f), Offset(x, 0f), Offset(x, size.height), 1f); x += step }
+        var y = 0f
+        while (y < size.height) { drawLine(Cyan.copy(alpha = 0.035f), Offset(0f, y), Offset(size.width, y), 1f); y += step }
+        val c = Offset(size.width / 2, size.height * 0.34f)
+        val r = size.width * 0.62f
+        rotate(rot, c) {
+            drawArc(Cyan.copy(alpha = 0.10f), 0f, 70f, false, Offset(c.x - r, c.y - r), Size(r * 2, r * 2), style = Stroke(2f))
+            drawArc(Cyan.copy(alpha = 0.10f), 180f, 70f, false, Offset(c.x - r, c.y - r), Size(r * 2, r * 2), style = Stroke(2f))
+        }
+        rotate(-rot * 1.3f, c) {
+            val r2 = r * 0.72f
+            drawArc(ArcBlue.copy(alpha = 0.12f), 90f, 50f, false, Offset(c.x - r2, c.y - r2), Size(r2 * 2, r2 * 2), style = Stroke(2f))
+            drawArc(ArcBlue.copy(alpha = 0.12f), 270f, 50f, false, Offset(c.x - r2, c.y - r2), Size(r2 * 2, r2 * 2), style = Stroke(2f))
+        }
+        drawCircle(Cyan.copy(alpha = 0.05f), r * 0.45f, c, style = Stroke(1.5f))
+    }
+}

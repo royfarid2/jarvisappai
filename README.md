@@ -6,8 +6,9 @@ OpenAI-compatible AI, hear replies in a British male voice, and control parts of
 ## Features
 - Streaming chat (SSE) with any OpenAI-compatible endpoint, conversation memory (Room), Arabic + English
   (Iraqi / Saudi dialect aware via the system prompt and `ar-IQ` / `ar-SA` speech recognition).
-- Voice in and out: Android SpeechRecognizer (STT), TextToSpeech (en-GB male voice preferred, low pitch),
-  optional premium cloud voice via your endpoint's `/audio/speech`, speed/pitch/voice settings,
+- Brain: Groq (OpenAI-compatible, default `llama-3.3-70b-versatile`) - or any OpenAI-compatible endpoint.
+- Voice out: **Fish Audio** with the community voice model "Jarvis (MCU) J.A.R.V.I.S" (editable ID), with automatic
+  fallback to Android TextToSpeech (en-GB male). Voice in: Android SpeechRecognizer. Speed/pitch/voice settings,
   replay button, stop/interrupt, waveform + listening/speaking animations, hands-free mode.
 - Replies are spoken sentence-by-sentence while they stream in.
 - Settings: endpoint, API key (EncryptedSharedPreferences, Android Keystore-backed), model, voice, speed, pitch,
@@ -22,9 +23,8 @@ Arabic equivalents work too (e.g. "افتح يوتيوب", "شغل الفلاش"
 Add a command: create a class extending `RegexAction` in `actions/Actions.kt` and add it to `ActionRegistry.actions`.
 
 ## Honest limitations
-- **Voice:** the original Marvel voice is copyrighted and is not included. JARVIS uses the best British male voice
-  installed on your phone (install "English (UK)" voice data in Android TTS settings). For higher quality, enable
-  *Premium cloud voice* in Settings and use a provider with an OpenAI-compatible `/audio/speech` route.
+- **Voice:** no Marvel audio is bundled. The JARVIS voice is a community voice model hosted by Fish Audio and generated
+  with your own Fish API key (credits/limits apply). Without a key, the app uses your phone's British male voice.
 - **Wake word:** always-on "Hey JARVIS" is not implemented (battery/privacy limits, needs a dedicated engine).
   Use the mic button and Hands-free mode instead.
 - **Android restrictions:** other apps' notifications are only readable after you enable Notification Access;
@@ -40,7 +40,8 @@ APK: `app/build/outputs/apk/debug/app-debug.apk`. Unit tests: `gradle testDebugU
 
 ## Install and configure
 1. Download the APK artifact, unzip, copy `app-debug.apk` to your phone and open it (allow "install unknown apps").
-2. On first launch enter your endpoint (e.g. `https://api.openai.com/v1`), API key and model, tap **Test connection**.
+2. On first launch the endpoint is pre-filled with Groq (`https://api.groq.com/openai/v1`). Paste your Groq key and optional Fish Audio key, tap **Test connection**.
+   If you installed an earlier build, uninstall it first (debug builds from different CI runs have different signatures).
 3. Tap the mic, grant microphone permission when asked, and talk. Settings (gear icon) edits everything later.
 
 ## Security

@@ -87,6 +87,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    private var greeted = false
+    /** Spoken once per launch, like the film: time-aware greeting. */
+    fun greet() {
+        val s = settings.value ?: return
+        if (greeted || !s.autoVoice) return
+        greeted = true
+        val h = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+        val part = when { h < 5 -> "evening"; h < 12 -> "morning"; h < 18 -> "afternoon"; else -> "evening" }
+        tts.enqueue(if (s.language.startsWith("ar")) "مرحباً. جميع الأنظمة تعمل، كيف أقدر أخدمك؟" else "Good $part, sir. All systems are online. How may I assist you?")
+    }
+
     fun clearHistory() { viewModelScope.launch { dao.clear() } }
     fun say(m: String) { toast.value = m }
     fun clearToast() { toast.value = null }

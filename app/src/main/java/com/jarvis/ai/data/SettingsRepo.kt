@@ -29,6 +29,10 @@ class SecureStore(private val ctx: Context) {
         get() = prefs.getString("api_key", "") ?: ""
         set(v) { prefs.edit().putString("api_key", v).apply() }
 
+    var fishKey: String
+        get() = prefs.getString("fish_key", "") ?: ""
+        set(v) { prefs.edit().putString("fish_key", v).apply() }
+
     private companion object { const val FILE = "jarvis_secure" }
 }
 
@@ -50,19 +54,21 @@ class SettingsRepo(private val ctx: Context) {
             autoVoice = p[AUTO_VOICE] ?: d.autoVoice,
             handsFree = p[HANDS_FREE] ?: d.handsFree,
             cloudTts = p[CLOUD] ?: d.cloudTts,
-            cloudTtsModel = p[CLOUD_MODEL] ?: d.cloudTtsModel,
-            cloudVoice = p[CLOUD_VOICE] ?: d.cloudVoice,
+            fishKey = secure.fishKey,
+            fishVoiceId = p[FISH_VOICE] ?: d.fishVoiceId,
+            fishModel = p[FISH_MODEL] ?: d.fishModel,
             onboarded = p[ONBOARDED] ?: d.onboarded,
         )
     }
 
     suspend fun save(s: Settings) = withContext(Dispatchers.IO) {
         secure.apiKey = s.apiKey.trim()
+        secure.fishKey = s.fishKey.trim()
         ctx.dataStore.edit { p ->
             p[ENDPOINT] = s.endpoint.trim(); p[MODEL] = s.model.trim(); p[VOICE] = s.voiceName
             p[RATE] = s.rate; p[PITCH] = s.pitch; p[LANG] = s.language; p[DARK] = s.dark
             p[AUTO_VOICE] = s.autoVoice; p[HANDS_FREE] = s.handsFree; p[CLOUD] = s.cloudTts
-            p[CLOUD_MODEL] = s.cloudTtsModel.trim(); p[CLOUD_VOICE] = s.cloudVoice.trim()
+            p[FISH_VOICE] = s.fishVoiceId.trim(); p[FISH_MODEL] = s.fishModel.trim()
             p[ONBOARDED] = s.onboarded
         }
     }
@@ -78,8 +84,8 @@ class SettingsRepo(private val ctx: Context) {
         val AUTO_VOICE = booleanPreferencesKey("auto_voice")
         val HANDS_FREE = booleanPreferencesKey("hands_free")
         val CLOUD = booleanPreferencesKey("cloud_tts")
-        val CLOUD_MODEL = stringPreferencesKey("cloud_tts_model")
-        val CLOUD_VOICE = stringPreferencesKey("cloud_voice")
+        val FISH_VOICE = stringPreferencesKey("fish_voice_id")
+        val FISH_MODEL = stringPreferencesKey("fish_model")
         val ONBOARDED = booleanPreferencesKey("onboarded")
     }
 }

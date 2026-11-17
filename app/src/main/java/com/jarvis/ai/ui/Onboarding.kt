@@ -60,6 +60,13 @@ fun OnboardingScreen(vm: MainViewModel) {
                 )
                 Spacer(Modifier.height(24.dp))
                 ConnectionFields(vm, draft) { draft = it }
+                Spacer(Modifier.height(28.dp))
+                Text("JARVIS voice", style = MaterialTheme.typography.titleLarge)
+                Spacer(Modifier.height(4.dp))
+                Text("Optional. Fish Audio gives the cinematic voice. Leave empty to use your phone's voice.",
+                    style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.height(12.dp))
+                VoiceFields(draft) { draft = it }
                 Spacer(Modifier.height(24.dp))
                 Button(
                     { vm.saveSettings(draft.copy(onboarded = true)) },
@@ -107,5 +114,29 @@ fun ConnectionFields(vm: MainViewModel, d: Settings, onChange: (Settings) -> Uni
         test.message?.let {
             Text(it, style = MaterialTheme.typography.bodyMedium, color = if (test.ok) Cyan else MaterialTheme.colorScheme.error)
         }
+    }
+}
+
+/** Fish Audio key + voice model id + model tier. */
+@Composable
+fun VoiceFields(d: Settings, onChange: (Settings) -> Unit) {
+    var show by remember { mutableStateOf(false) }
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        OutlinedTextField(
+            d.fishKey, { onChange(d.copy(fishKey = it)) }, Modifier.fillMaxWidth(),
+            label = { Text("Fish Audio API key") }, singleLine = true,
+            visualTransformation = if (show) androidx.compose.ui.text.input.VisualTransformation.None else PasswordVisualTransformation(),
+            trailingIcon = { TextButton({ show = !show }) { Text(if (show) "Hide" else "Show") } },
+        )
+        OutlinedTextField(
+            d.fishVoiceId, { onChange(d.copy(fishVoiceId = it)) }, Modifier.fillMaxWidth(),
+            label = { Text("Voice model ID") }, singleLine = true,
+            supportingText = { Text("Default: Jarvis (MCU) J.A.R.V.I.S. Paste any ID from fish.audio/m/<ID>") },
+        )
+        OutlinedTextField(
+            d.fishModel, { onChange(d.copy(fishModel = it)) }, Modifier.fillMaxWidth(),
+            label = { Text("Fish model") }, singleLine = true,
+            supportingText = { Text("s2.1-pro-free (free tier) or s2.1-pro") },
+        )
     }
 }

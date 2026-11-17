@@ -34,11 +34,16 @@ fun JarvisRoot(vm: MainViewModel) {
                 st == null -> Box(Modifier.fillMaxSize(), Alignment.Center) { JarvisLogo(logoSize = 96.dp, active = true) }
                 !st.onboarded -> OnboardingScreen(vm)
                 else -> {
+                    var booted by rememberSaveable { mutableStateOf(false) }
                     var showSettings by rememberSaveable { mutableStateOf(false) }
                     BackHandler(showSettings) { showSettings = false }
-                    Crossfade(showSettings, label = "screen") { settingsOpen ->
-                        if (settingsOpen) SettingsScreen(vm, st) { showSettings = false }
-                        else ChatScreen(vm, st) { showSettings = true }
+                    if (!booted) {
+                        BootScreen { booted = true; vm.greet() }
+                    } else {
+                        Crossfade(showSettings, label = "screen") { settingsOpen ->
+                            if (settingsOpen) SettingsScreen(vm, st) { showSettings = false }
+                            else ChatScreen(vm, st) { showSettings = true }
+                        }
                     }
                 }
             }

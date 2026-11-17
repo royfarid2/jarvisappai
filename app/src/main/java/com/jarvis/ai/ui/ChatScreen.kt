@@ -76,13 +76,15 @@ fun ChatScreen(vm: MainViewModel, s: Settings, openSettings: () -> Unit) {
         else -> s.model
     }
 
+    Box(Modifier.fillMaxSize()) {
+    HudBackground(Modifier.fillMaxSize())
     Column(Modifier.fillMaxSize().systemBarsPadding().imePadding()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             JarvisLogo(logoSize = 36.dp, active = listening || speaking || busy)
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text("J.A.R.V.I.S.", style = MaterialTheme.typography.labelSmall, color = Cyan)
-                Text(status, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                Text(status.uppercase(), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
             }
             IconButton(openSettings) { Icon(Icons.Filled.Settings, "Settings", tint = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
@@ -155,6 +157,7 @@ fun ChatScreen(vm: MainViewModel, s: Settings, openSettings: () -> Unit) {
             }
         }
     }
+    }
 }
 
 @Composable
@@ -162,8 +165,9 @@ private fun Bubble(role: String, text: String, onReplay: (() -> Unit)?) {
     if (role == "user") {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
             Surface(
-                color = MaterialTheme.colorScheme.surfaceVariant,
-                shape = RoundedCornerShape(18.dp, 18.dp, 4.dp, 18.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
+                shape = RoundedCornerShape(14.dp, 14.dp, 2.dp, 14.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, Cyan.copy(alpha = 0.35f)),
                 modifier = Modifier.widthIn(max = 300.dp),
             ) { Text(text, Modifier.padding(horizontal = 14.dp, vertical = 10.dp), style = MaterialTheme.typography.bodyLarge) }
         }
