@@ -336,7 +336,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         resetReveal()
         streaming.value = ""
         try {
-            api.chatStream(useS, msgs).collect { chunk ->
+            api.chatStreamRouted(useS, if (shot != null) emptyList() else s.fallbacks, msgs).collect { chunk ->
                 sb.append(chunk)
                 if (s.autoVoice) cursor = flushSpeech(sb, cursor, false) else streaming.value = sb.toString()
             }
@@ -378,12 +378,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             val c = sb[i]
             if (!inFence && (c == '\n' || c == '!' || c == '?' || c == '\u061F' ||
                     (c == '.' && i + 1 < sb.length && sb[i + 1].isWhitespace()))) end = i + 1
+            // first audio sooner: the very first chunk of a reply may end at a clause break once it is long enough
+            else if (!inFence && cursor == 0 && end < 0 && (c == ',' || c == ';' || c == ':') &&
+                i + 1 < sb.length && sb[i + 1] == ' ' && i + 1 >= 40) end = i + 1
             i++
         }
         if (final) end = sb.length
         if (end > cursor) {
             val display = sb.substring(cursor, end)
-            if (final || display.length >= 24 || display.contains("```")) {
+            if (final || display.length >= (if (cursor == 0) 16 else 24) || display.contains("```")) {
                 tts.enqueue(cleanForSpeech(display)) { dur -> reveal(display, dur) }
                 return end
             }

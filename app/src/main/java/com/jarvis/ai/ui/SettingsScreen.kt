@@ -106,6 +106,37 @@ fun SettingsScreen(vm: MainViewModel, current: Settings, onBack: () -> Unit) {
             VoiceFields(d) { d = it }
             OutlinedButton({ vm.previewVoice(d) }, Modifier.fillMaxWidth()) { Text("Preview JARVIS voice") }
 
+            Section("Backup AI providers")
+            Text(
+                "If the main provider fails or runs out of quota, JARVIS tries these in order, and skips a failing one for a while instead of retrying it. " +
+                    "Any OpenAI-compatible endpoint works (OpenAI, Groq, OpenRouter, a local server). Keys are stored encrypted.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            d.fallbacks.forEachIndexed { i, p ->
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("${i + 1}. ${p.name.ifBlank { p.endpoint }}", style = MaterialTheme.typography.bodyMedium)
+                        Text(p.model, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    TextButton({ d = d.copy(fallbacks = d.fallbacks.filterIndexed { idx, _ -> idx != i }) }) { Text("Remove") }
+                }
+            }
+            var pName by remember { mutableStateOf("") }
+            var pEnd by remember { mutableStateOf("") }
+            var pKey by remember { mutableStateOf("") }
+            var pModel by remember { mutableStateOf("") }
+            OutlinedTextField(pName, { pName = it }, Modifier.fillMaxWidth(), label = { Text("Name (e.g. OpenRouter)") }, singleLine = true)
+            OutlinedTextField(pEnd, { pEnd = it }, Modifier.fillMaxWidth(), label = { Text("Endpoint (https://…/v1)") }, singleLine = true)
+            OutlinedTextField(pKey, { pKey = it }, Modifier.fillMaxWidth(), label = { Text("API key") }, singleLine = true,
+                visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation())
+            OutlinedTextField(pModel, { pModel = it }, Modifier.fillMaxWidth(), label = { Text("Model") }, singleLine = true)
+            OutlinedButton({
+                if (pEnd.isNotBlank() && pModel.isNotBlank()) {
+                    d = d.copy(fallbacks = d.fallbacks + com.jarvis.ai.data.Provider(pName.trim(), pEnd.trim(), pKey.trim(), pModel.trim()))
+                    pName = ""; pEnd = ""; pKey = ""; pModel = ""
+                }
+            }, Modifier.fillMaxWidth()) { Text("Add backup provider") }
+
             Section("Hey JARVIS (wake word)")
             Text(
                 "Say \"Hey Jarvis\" from any app and the assistant panel slides up over it, like Google Assistant. " +

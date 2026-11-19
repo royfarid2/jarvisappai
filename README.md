@@ -15,6 +15,12 @@ OpenAI-compatible AI, hear replies in a British male voice, and control parts of
   language, theme, auto-voice, permissions, clear history. Preferences in DataStore.
 - Local notifications and timed reminders.
 
+## Backup AI providers (automatic fallback)
+Settings > *Backup AI providers*: add any OpenAI-compatible endpoint (key stored encrypted). If the main provider fails
+before it starts answering (quota, rate limit, bad key, outage), JARVIS moves to the next one in order and skips the
+failing one for a while (15 min for exhausted quota, 1 min for rate limits, 30 s for outages). A failure in the middle
+of a reply is reported, not silently restarted. Not done yet: usage statistics, native Gemini/Anthropic formats, local model fallback.
+
 ## Chat, sessions and code
 - Multiple **chat sessions** (drawer): new chat, auto-titled, rename, delete; each keeps its own context.
 - Voice and text are **in sync**: each sentence's text types out as you hear it (Fish Audio synthesises the next

@@ -1,6 +1,8 @@
 package com.jarvis.ai.net
 
+import com.jarvis.ai.data.Provider
 import com.jarvis.ai.data.Settings
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
@@ -80,6 +82,50 @@ class ApiClient {
             }
         }
     }.flowOn(Dispatchers.IO)
+
+    // ---- provider router: temporary cool-downs so exhausted or failing providers are not retried over and over ----
+    private val cooldown = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    private fun pid(s: Settings) = base(s) + "|" + s.model
+
+    private fun coolDownMs(e: Exception): Long {
+        val msg = e.message.orEmpty()
+        val code = Regex("HTTP (\\d+)").find(msg)?.groupValues?.get(1)?.toIntOrNull()
+        return when {
+            code == 429 && Regex("quota|insufficient|exceeded your current|billing", RegexOption.IGNORE_CASE).containsMatchIn(msg) -> 15 * 60_000L
+            code == 429 -> 60_000L
+            code == 401 || code == 402 || code == 403 -> 60 * 60_000L
+            code != null && code >= 500 -> 30_000L
+            code == 400 || code == 404 -> 5 * 60_000L      // wrong model name / unsupported request for this provider
+            else -> 20_000L                                  // network error
+        }
+    }
+
+    /**
+     * Streams from the main provider and, if it fails BEFORE producing any text (quota, rate limit, outage, bad key),
+     * moves on to the next configured backup. Failed providers sit out a cool-down. A failure after text has started
+     * is reported instead of silently restarting, so the reply is never duplicated.
+     */
+    fun chatStreamRouted(primary: Settings, backups: List<Provider>, msgs: List<ChatMsg>): Flow<String> = flow {
+        val chain = listOf(primary) + backups.filter { it.endpoint.isNotBlank() && it.model.isNotBlank() }
+            .map { primary.copy(endpoint = it.endpoint, apiKey = it.apiKey, model = it.model) }
+        val now = System.currentTimeMillis()
+        val usable = chain.filter { (cooldown[pid(it)] ?: 0L) <= now }.ifEmpty { chain }
+        var last: Exception? = null
+        for (p in usable) {
+            var emitted = false
+            try {
+                chatStream(p, msgs).collect { emitted = true; emit(it) }
+                cooldown.remove(pid(p))
+                return@flow
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) {
+                if (emitted) throw e
+                last = e
+                cooldown[pid(p)] = now + coolDownMs(e)
+            }
+        }
+        throw last ?: IOException("No AI provider is available.")
+    }
 
     /** Non-streaming completion; returns the assistant text. */
     suspend fun chatOnce(s: Settings, msgs: List<ChatMsg>, maxTokens: Int = 1500): String = withContext(Dispatchers.IO) {
