@@ -103,15 +103,16 @@ class JarvisAccessibilityService : AccessibilityService() {
         return swipe(x, y1, x, y2)
     }
 
-    fun global(name: String): Boolean = performGlobalAction(
-        when (name) {
+    fun global(name: String): Boolean {
+        val action = when (name) {
             "back" -> GLOBAL_ACTION_BACK
             "home" -> GLOBAL_ACTION_HOME
             "recents" -> GLOBAL_ACTION_RECENTS
             "notifications" -> GLOBAL_ACTION_NOTIFICATIONS
             else -> return false
         }
-    )
+        return performGlobalAction(action)
+    }
 
     private fun tap(x: Float, y: Float) = gesture(Path().apply { moveTo(x, y) }, 60)
     private fun swipe(x1: Float, y1: Float, x2: Float, y2: Float) = gesture(Path().apply { moveTo(x1, y1); lineTo(x2, y2) }, 350)
