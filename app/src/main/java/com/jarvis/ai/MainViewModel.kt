@@ -336,7 +336,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         resetReveal()
         streaming.value = ""
         try {
-            api.chatStreamRouted(useS, if (shot != null) emptyList() else s.fallbacks, msgs).collect { chunk ->
+            api.chatStreamRouted(useS, if (useS !== s) emptyList() else s.fallbacks, msgs).collect { chunk ->
                 sb.append(chunk)
                 if (s.autoVoice) cursor = flushSpeech(sb, cursor, false) else streaming.value = sb.toString()
             }
