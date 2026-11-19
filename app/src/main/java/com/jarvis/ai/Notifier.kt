@@ -14,6 +14,43 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 
 object Notifier {
+    const val ID_AGENT = 4242
+    const val ID_CONFIRM = 4243
+
+    private fun canNotify(ctx: Context) = Build.VERSION.SDK_INT < 33 ||
+        ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+
+    private fun action(ctx: Context, code: Int, act: String) = PendingIntent.getBroadcast(
+        ctx, code, Intent(ctx, com.jarvis.ai.agent.AgentActionReceiver::class.java).setAction(act),
+        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+
+    /** Ongoing "working" notification with a Stop button, visible while another app is in front. */
+    @SuppressLint("MissingPermission")
+    fun agentStatus(ctx: Context, text: String): Boolean {
+        if (!canNotify(ctx)) return false
+        val n = NotificationCompat.Builder(ctx, JarvisApp.CHANNEL_ID).setSmallIcon(R.drawable.ic_stat)
+            .setContentTitle("JARVIS is working").setContentText(text).setOngoing(true).setOnlyAlertOnce(true)
+            .addAction(0, "Stop", action(ctx, 1, com.jarvis.ai.agent.AgentControl.ACTION_STOP)).build()
+        NotificationManagerCompat.from(ctx).notify(ID_AGENT, n)
+        return true
+    }
+
+    /** Heads-up Allow/Deny question for sensitive taps. Returns false if it could not be shown. */
+    @SuppressLint("MissingPermission")
+    fun askConfirm(ctx: Context, text: String): Boolean {
+        if (!canNotify(ctx)) return false
+        val n = NotificationCompat.Builder(ctx, JarvisApp.ALERT_CHANNEL).setSmallIcon(R.drawable.ic_stat)
+            .setContentTitle("JARVIS needs your approval").setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text)).setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setTimeoutAfter(60_000)
+            .addAction(0, "Allow", action(ctx, 2, com.jarvis.ai.agent.AgentControl.ACTION_ALLOW))
+            .addAction(0, "Deny", action(ctx, 3, com.jarvis.ai.agent.AgentControl.ACTION_DENY)).build()
+        NotificationManagerCompat.from(ctx).notify(ID_CONFIRM, n)
+        return true
+    }
+
+    fun cancel(ctx: Context, id: Int) = NotificationManagerCompat.from(ctx).cancel(id)
+
     @SuppressLint("MissingPermission")
     fun post(ctx: Context, title: String, text: String): Boolean {
         if (Build.VERSION.SDK_INT >= 33 &&

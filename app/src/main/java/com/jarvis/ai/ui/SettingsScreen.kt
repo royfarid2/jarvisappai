@@ -21,6 +21,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import com.jarvis.ai.JarvisNotificationListener
+import com.jarvis.ai.agent.JarvisAccessibilityService
 import com.jarvis.ai.MainViewModel
 import com.jarvis.ai.data.Settings
 
@@ -40,6 +41,7 @@ fun SettingsScreen(vm: MainViewModel, current: Settings, onBack: () -> Unit) {
         refresh.let { NotificationManagerCompat.from(ctx).areNotificationsEnabled() }
     }
     val listenerOn = remember(refresh) { refresh.let { JarvisNotificationListener.isEnabled(ctx) } }
+    val a11yOn = remember(refresh) { refresh.let { JarvisAccessibilityService.isEnabled(ctx) } }
     val micOn = remember(refresh) { ContextCompat.checkSelfPermission(ctx, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED }
 
     if (confirmClear) AlertDialog(
@@ -125,13 +127,22 @@ fun SettingsScreen(vm: MainViewModel, current: Settings, onBack: () -> Unit) {
                 else "Optional. Lets JARVIS read your notifications aloud on request. You grant it in Android settings.",
                 if (listenerOn) "Manage" else "Open settings",
             ) { ctx.startActivity(Intent(android.provider.Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+            PermRow(
+                "Accessibility (Agent mode)",
+                if (a11yOn) "Enabled: JARVIS can see the screen and operate apps when you give it a task in Agent mode"
+                else "Optional. Lets JARVIS read your screen and tap, type and scroll for you. You grant it in Android settings (on Android 13+ first allow restricted settings in App info).",
+                if (a11yOn) "Manage" else "Open settings",
+            ) { ctx.startActivity(Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+            SwitchRow("Use screenshots", "Lets JARVIS send a screenshot to your AI provider when text alone isn't enough (Android 11+). Off by default.", d.agentVision) { d = d.copy(agentVision = it) }
+            if (d.agentVision) OutlinedTextField(d.visionModel, { d = d.copy(visionModel = it) }, Modifier.fillMaxWidth(),
+                label = { Text("Vision model") }, singleLine = true, supportingText = { Text("Groq: qwen/qwen3.8-27b") })
             Text(
-                "Device control uses standard Android intents and APIs only. JARVIS does not use an Accessibility Service and cannot bypass Android's restrictions.",
+                "JARVIS never types passwords and asks before sensitive taps (send, pay, delete). Stop an agent task any time from its notification.",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
 
             Section("Data")
-            OutlinedButton({ confirmClear = true }, Modifier.fillMaxWidth()) { Text("Clear conversation history") }
+            OutlinedButton({ confirmClear = true }, Modifier.fillMaxWidth()) { Text("Delete all chats") }
             Spacer(Modifier.height(32.dp))
         }
     }

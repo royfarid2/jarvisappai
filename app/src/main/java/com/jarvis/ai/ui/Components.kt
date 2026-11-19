@@ -10,7 +10,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
@@ -20,36 +23,59 @@ import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.sin
 
-/** The JARVIS arc-reactor style mark. Spins faster while [active]. */
+/** The JARVIS mark: ticked outer ring, counter-rotating segments, reactor triangle and a glowing core. */
 @Composable
 fun JarvisLogo(modifier: Modifier = Modifier, logoSize: Dp = 120.dp, active: Boolean = false) {
     val t = rememberInfiniteTransition(label = "logo")
     val rot by t.animateFloat(
         0f, 360f,
-        infiniteRepeatable(tween(if (active) 5000 else 16000, easing = LinearEasing)), label = "rot"
+        infiniteRepeatable(tween(if (active) 6000 else 20000, easing = LinearEasing)), label = "rot"
     )
     val pulse by t.animateFloat(
-        0.9f, 1f,
-        infiniteRepeatable(tween(1400, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "pulse"
+        0.85f, 1f,
+        infiniteRepeatable(tween(if (active) 700 else 1600, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "pulse"
     )
     Canvas(modifier.size(logoSize)) {
         val r = this.size.minDimension / 2
         val c = center
-        drawCircle(Cyan.copy(alpha = 0.10f), radius = r * 0.95f * pulse)
-        val outer = Size(r * 1.8f, r * 1.8f)
-        val outerTl = Offset(c.x - r * 0.9f, c.y - r * 0.9f)
-        rotate(rot) {
-            drawArc(Cyan, 15f, 110f, false, outerTl, outer, style = Stroke(r * 0.05f, cap = StrokeCap.Round))
-            drawArc(Cyan, 195f, 110f, false, outerTl, outer, style = Stroke(r * 0.05f, cap = StrokeCap.Round))
+        fun ring(rad: Float) = Pair(Offset(c.x - rad, c.y - rad), Size(rad * 2, rad * 2))
+        // soft halo
+        drawCircle(Brush.radialGradient(listOf(Cyan.copy(alpha = 0.28f * pulse), Color.Transparent), c, r), r)
+        // outer tick ring
+        rotate(rot, c) {
+            for (i in 0 until 60) {
+                val ang = Math.toRadians(i * 6.0)
+                val long = i % 5 == 0
+                val r1 = r * (if (long) 0.84f else 0.89f)
+                val r2 = r * 0.95f
+                drawLine(
+                    Cyan.copy(alpha = if (long) 0.95f else 0.45f),
+                    Offset(c.x + (r1 * kotlin.math.cos(ang)).toFloat(), c.y + (r1 * kotlin.math.sin(ang)).toFloat()),
+                    Offset(c.x + (r2 * kotlin.math.cos(ang)).toFloat(), c.y + (r2 * kotlin.math.sin(ang)).toFloat()),
+                    strokeWidth = r * (if (long) 0.028f else 0.016f), cap = StrokeCap.Round
+                )
+            }
         }
-        val inner = Size(r * 1.28f, r * 1.28f)
-        val innerTl = Offset(c.x - r * 0.64f, c.y - r * 0.64f)
-        rotate(-rot * 1.5f) {
-            drawArc(ArcBlue, 60f, 80f, false, innerTl, inner, style = Stroke(r * 0.045f, cap = StrokeCap.Round))
-            drawArc(ArcBlue, 240f, 80f, false, innerTl, inner, style = Stroke(r * 0.045f, cap = StrokeCap.Round))
+        drawCircle(Cyan.copy(alpha = 0.35f), r * 0.80f, c, style = Stroke(r * 0.012f))
+        // counter-rotating segments
+        val (tl, sz) = ring(r * 0.68f)
+        rotate(-rot * 1.4f, c) {
+            for (k in 0 until 3) drawArc(ArcBlue, k * 120f + 8f, 90f, false, tl, sz, style = Stroke(r * 0.06f, cap = StrokeCap.Round))
         }
-        drawCircle(Cyan, radius = r * 0.2f * pulse)
-        drawCircle(Color(0xFF0A0B0D), radius = r * 0.11f)
+        // reactor triangle
+        val tr = r * 0.46f
+        val tri = Path().apply {
+            for (k in 0 until 3) {
+                val ang = Math.toRadians(-90.0 + k * 120.0)
+                val x = c.x + (tr * kotlin.math.cos(ang)).toFloat(); val y = c.y + (tr * kotlin.math.sin(ang)).toFloat()
+                if (k == 0) moveTo(x, y) else lineTo(x, y)
+            }
+            close()
+        }
+        rotate(rot * 0.25f, c) { drawPath(tri, Cyan.copy(alpha = 0.9f), style = Stroke(r * 0.035f, join = StrokeJoin.Round)) }
+        // core
+        drawCircle(Brush.radialGradient(listOf(Color.White, Cyan, Color.Transparent), c, r * 0.30f * (0.9f + 0.1f * pulse)), r * 0.30f)
+        drawCircle(Color.White.copy(alpha = 0.95f), r * 0.07f, c)
     }
 }
 

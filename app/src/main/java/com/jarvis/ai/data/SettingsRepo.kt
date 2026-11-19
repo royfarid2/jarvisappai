@@ -57,6 +57,8 @@ class SettingsRepo(private val ctx: Context) {
             fishKey = secure.fishKey,
             fishVoiceId = p[FISH_VOICE] ?: d.fishVoiceId,
             fishModel = p[FISH_MODEL] ?: d.fishModel,
+            visionModel = p[VISION_MODEL] ?: d.visionModel,
+            agentVision = p[AGENT_VISION] ?: d.agentVision,
             onboarded = p[ONBOARDED] ?: d.onboarded,
         )
     }
@@ -69,6 +71,7 @@ class SettingsRepo(private val ctx: Context) {
             p[RATE] = s.rate; p[PITCH] = s.pitch; p[LANG] = s.language; p[DARK] = s.dark
             p[AUTO_VOICE] = s.autoVoice; p[HANDS_FREE] = s.handsFree; p[CLOUD] = s.cloudTts
             p[FISH_VOICE] = s.fishVoiceId.trim(); p[FISH_MODEL] = s.fishModel.trim()
+            p[VISION_MODEL] = s.visionModel.trim(); p[AGENT_VISION] = s.agentVision
             p[ONBOARDED] = s.onboarded
         }
     }
@@ -87,5 +90,7 @@ class SettingsRepo(private val ctx: Context) {
         val FISH_VOICE = stringPreferencesKey("fish_voice_id")
         val FISH_MODEL = stringPreferencesKey("fish_model")
         val ONBOARDED = booleanPreferencesKey("onboarded")
+        val VISION_MODEL = stringPreferencesKey("vision_model")
+        val AGENT_VISION = booleanPreferencesKey("agent_vision")
     }
 }

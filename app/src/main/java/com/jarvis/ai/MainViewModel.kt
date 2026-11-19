@@ -2,22 +2,33 @@ package com.jarvis.ai
 
 import android.app.Application
 import android.content.Context
+import android.content.Intent
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.jarvis.ai.actions.ActionRegistry
 import com.jarvis.ai.actions.ActionResult
+import com.jarvis.ai.agent.AgentControl
+import com.jarvis.ai.agent.AgentRunner
+import com.jarvis.ai.agent.JarvisAccessibilityService
 import com.jarvis.ai.data.MessageEntity
+import com.jarvis.ai.data.SessionEntity
 import com.jarvis.ai.data.Settings
 import com.jarvis.ai.data.SettingsRepo
 import com.jarvis.ai.net.ApiClient
+import com.jarvis.ai.net.ChatMsg
 import com.jarvis.ai.voice.SttManager
 import com.jarvis.ai.voice.TtsManager
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -32,22 +43,32 @@ data class TestUi(
     val models: List<String> = emptyList(),
 )
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val appCtx: Context = app.applicationContext
     private val repo = SettingsRepo(appCtx)
     private val dao = (app as JarvisApp).db.dao()
     private val api = ApiClient()
+    private val statePrefs = appCtx.getSharedPreferences("jarvis_state", Context.MODE_PRIVATE)
 
     val tts = TtsManager(appCtx) { s, t -> api.speech(s, t, appCtx.cacheDir) }
     val stt = SttManager(appCtx)
+    private val agent = AgentRunner(appCtx, api) { tts.enqueue(it) }
 
     val settings = MutableStateFlow<Settings?>(null)
-    val messages: StateFlow<List<MessageEntity>> =
-        dao.observe().stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    // ----- sessions -----
+    val sessions: StateFlow<List<SessionEntity>> = dao.sessions().stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    val currentSession = MutableStateFlow(statePrefs.getLong("session", -1L))
+    val messages: StateFlow<List<MessageEntity>> = currentSession
+        .flatMapLatest { if (it < 0) flowOf(emptyList()) else dao.observe(it) }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
     val streaming = MutableStateFlow<String?>(null)
     val busy = MutableStateFlow(false)
     val toast = MutableStateFlow<String?>(null)
     val test = MutableStateFlow(TestUi())
+    val agentMode = MutableStateFlow(false)
 
     private var job: Job? = null
     private var voiceSession = false
@@ -98,9 +119,33 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         tts.enqueue(if (s.language.startsWith("ar")) "مرحباً. جميع الأنظمة تعمل، كيف أقدر أخدمك؟" else "Good $part, sir. All systems are online. How may I assist you?")
     }
 
-    fun clearHistory() { viewModelScope.launch { dao.clear() } }
     fun say(m: String) { toast.value = m }
     fun clearToast() { toast.value = null }
+
+    // ---------- sessions ----------
+    fun openSession(id: Long) {
+        if (busy.value) return
+        currentSession.value = id
+        statePrefs.edit().putLong("session", id).apply()
+    }
+    fun newChat() = openSession(-1L)
+    fun renameSession(id: Long, title: String) { viewModelScope.launch { if (title.isNotBlank()) dao.rename(id, title.trim().take(60)) } }
+    fun deleteSession(id: Long) {
+        viewModelScope.launch {
+            dao.deleteMessages(id); dao.deleteSession(id)
+            if (currentSession.value == id) openSession(-1L)
+        }
+    }
+    fun clearHistory() { viewModelScope.launch { dao.clearMessages(); dao.clearSessions(); openSession(-1L) } }
+
+    private suspend fun ensureSession(firstMessage: String): Pair<Long, Boolean> {
+        val cur = currentSession.value
+        if (cur >= 0) return cur to false
+        val id = dao.insertSession(SessionEntity(title = firstMessage.replace('\n', ' ').take(40)))
+        currentSession.value = id
+        statePrefs.edit().putLong("session", id).apply()
+        return id to true
+    }
 
     // ---------- conversation ----------
     fun send(text: String, fromVoice: Boolean = false) {
@@ -114,6 +159,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun stopAll() {
         voiceSession = false
+        AgentControl.stop = true
         job?.cancel()
         tts.stop()
         stt.stop()
@@ -128,7 +174,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val s = settings.value ?: return
         if (stt.listening.value) { voiceSession = false; stt.stop(); return }
         tts.stop()                       // interrupt JARVIS if he is talking
-        if (busy.value) job?.cancel()    // ... or still generating
+        if (busy.value) stopAll()        // ... or still generating
         startListening(s)
     }
 
@@ -148,8 +194,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private suspend fun respond(text: String, s: Settings) {
         busy.value = true
-        dao.insert(MessageEntity(role = "user", content = text))
+        val (sid, isNew) = ensureSession(text)
+        dao.insert(MessageEntity(sessionId = sid, role = "user", content = text))
+        dao.touch(sid, System.currentTimeMillis())
         try {
+            if (agentMode.value) { runAgent(text, s, sid); return }
+            if (SCREEN_Q.containsMatchIn(ActionRegistry.normalize(text))) { chat(s, sid, screen = true); return }
             val match = ActionRegistry.find(text)
             if (match != null) {
                 val res = try {
@@ -157,37 +207,88 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 } catch (e: CancellationException) { throw e }
                 catch (e: Exception) { ActionResult("I wasn't able to do that: ${e.message}", false) }
                 if (res.handled) {
-                    dao.insert(MessageEntity(role = "assistant", content = res.message))
+                    dao.insert(MessageEntity(sessionId = sid, role = "assistant", content = res.message))
                     if (s.autoVoice) tts.enqueue(cleanForSpeech(res.message))
                     return
                 }
             }
-            chat(s)
+            chat(s, sid, screen = false)
+            if (isNew) titleFor(s, sid)
         } finally {
             busy.value = false
             resumeListeningIfNeeded()
         }
     }
 
-    private suspend fun chat(s: Settings) {
+    // ----- text revealed in step with the voice -----
+    private val visible = StringBuilder()
+    private var revealJob: Job? = null
+    private var revealTail = ""
+
+    private fun resetReveal() { revealJob?.cancel(); revealTail = ""; visible.setLength(0) }
+
+    /** Called when a chunk starts being heard: types [display] out over the chunk's audio duration. */
+    private fun reveal(display: String, durMs: Long) {
+        revealJob?.cancel()
+        if (revealTail.isNotEmpty()) { visible.append(revealTail); revealTail = "" }
+        if (durMs < 300 || display.length < 4) {
+            visible.append(display); streaming.value = visible.toString(); return
+        }
+        revealTail = display
+        revealJob = viewModelScope.launch {
+            val steps = (durMs * 0.9 / 33).toInt().coerceAtLeast(1)
+            val total = display.length
+            val base = visible.toString()
+            for (i in 1..steps) {
+                streaming.value = base + display.substring(0, total * i / steps)
+                delay(33)
+            }
+            visible.append(display); revealTail = ""
+            streaming.value = visible.toString()
+        }
+    }
+
+    private suspend fun chat(s: Settings, sid: Long, screen: Boolean) {
         if (s.endpoint.isBlank()) {
-            dao.insert(MessageEntity(role = "note", content = "No AI endpoint is configured yet. Open Settings and add one so I can think, sir."))
+            dao.insert(MessageEntity(sessionId = sid, role = "note", content = "No AI endpoint is configured yet. Open Settings and add one so I can think, sir."))
             return
         }
-        val history = dao.last(24).reversed().map { it.role to it.content }
-        val msgs = listOf("system" to systemPrompt()) + history
+        var history = dao.last(sid, 24).reversed().map { ChatMsg(it.role, it.content) }
+        var useS = s
+        if (screen) {
+            val svc = JarvisAccessibilityService.instance
+            if (svc == null) {
+                dao.insert(MessageEntity(sessionId = sid, role = "note", content = "To look at your screen I need the JARVIS accessibility service. Enable it in Settings > Permissions, then ask again."))
+                return
+            }
+            if (JarvisApp.foreground) {
+                val warn = "Switch to the screen you want me to look at. I'll look in six seconds."
+                dao.insert(MessageEntity(sessionId = sid, role = "assistant", content = warn))
+                if (s.autoVoice) tts.enqueue(warn)
+                delay(6000)
+            }
+            val snap = svc.snapshot()
+            val shot = if (s.agentVision) svc.screenshotB64() else null
+            val last = history.last()
+            history = history.dropLast(1) + ChatMsg("user", last.content + "\n\n[SCREEN CONTENT of app ${snap.pkg}]\n${snap.text}", shot)
+            if (shot != null) useS = s.copy(model = s.visionModel)
+        }
+        val msgs = listOf(ChatMsg("system", systemPrompt())) + history
         val sb = StringBuilder()
         var cursor = 0
         var failed: String? = null
         var completed = false
+        resetReveal()
         streaming.value = ""
         try {
-            api.chatStream(s, msgs).collect { chunk ->
+            api.chatStream(useS, msgs).collect { chunk ->
                 sb.append(chunk)
-                streaming.value = sb.toString()
-                if (s.autoVoice) cursor = flushSpeech(sb, cursor, false)
+                if (s.autoVoice) cursor = flushSpeech(sb, cursor, false) else streaming.value = sb.toString()
             }
-            if (s.autoVoice) cursor = flushSpeech(sb, cursor, true)
+            if (s.autoVoice) {
+                cursor = flushSpeech(sb, cursor, true)
+                tts.speaking.first { !it }          // let the voice (and the text reveal) finish
+            }
             completed = true
         } catch (e: CancellationException) {
             throw e
@@ -195,31 +296,40 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             failed = e.message ?: "Network error"
         } finally {
             withContext(NonCancellable) {
+                revealJob?.cancel()
                 streaming.value = null
                 val full = sb.toString().trim()
-                if (full.isNotEmpty()) dao.insert(MessageEntity(role = "assistant", content = full))
-                if (failed != null) dao.insert(MessageEntity(role = "note", content = "I couldn't reach the AI service: $failed"))
+                if (full.isNotEmpty()) dao.insert(MessageEntity(sessionId = sid, role = "assistant", content = full))
+                if (failed != null) dao.insert(MessageEntity(sessionId = sid, role = "note", content = "I couldn't reach the AI service: $failed"))
             }
         }
         if (completed && !JarvisApp.foreground && sb.isNotBlank()) {
-            Notifier.post(appCtx, "JARVIS", sb.toString().trim().take(140))
+            Notifier.post(appCtx, "JARVIS", cleanForSpeech(sb.toString()).take(140))
         }
     }
 
-    /** Speaks completed sentences while the rest of the reply is still streaming. */
+    /** Sends finished sentences / code blocks to the voice; their text appears when they are heard. */
     private fun flushSpeech(sb: StringBuilder, cursor: Int, final: Boolean): Int {
         var end = -1
-        for (i in cursor until sb.length) {
+        var inFence = false
+        var i = cursor
+        while (i < sb.length) {
+            if (sb.startsWith("```", i)) {
+                inFence = !inFence
+                i += 3
+                if (!inFence) end = i              // a closed code block is a chunk boundary
+                continue
+            }
             val c = sb[i]
-            val boundary = c == '\n' || c == '!' || c == '?' || c == '\u061F' ||
-                (c == '.' && i + 1 < sb.length && sb[i + 1].isWhitespace())
-            if (boundary) end = i + 1
+            if (!inFence && (c == '\n' || c == '!' || c == '?' || c == '\u061F' ||
+                    (c == '.' && i + 1 < sb.length && sb[i + 1].isWhitespace()))) end = i + 1
+            i++
         }
         if (final) end = sb.length
         if (end > cursor) {
-            val chunk = sb.substring(cursor, end)
-            if (final || chunk.length >= 24) {
-                tts.enqueue(cleanForSpeech(chunk))
+            val display = sb.substring(cursor, end)
+            if (final || display.length >= 24 || display.contains("```")) {
+                tts.enqueue(cleanForSpeech(display)) { dur -> reveal(display, dur) }
                 return end
             }
         }
@@ -227,24 +337,73 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun cleanForSpeech(t: String): String = t
-        .replace(Regex("```[\\s\\S]*?```"), " ")
+        .replace(Regex("```[\\s\\S]*?(```|$)"), " ")
         .replace(Regex("\\[([^\\]]+)]\\([^)]*\\)"), "$1")
         .replace(Regex("[*_#`>~|]"), "")
         .replace(Regex("(?m)^\\s*[-\u2022]\\s+"), "")
         .trim()
 
+    private suspend fun titleFor(s: Settings, sid: Long) {
+        try {
+            val first = dao.last(sid, 2).reversed().joinToString("\n") { it.role + ": " + it.content.take(300) }
+            val t = api.chatOnce(s, listOf(
+                ChatMsg("system", "Write a 2-5 word title for this conversation, in the conversation's language. Reply with the title only, no quotes."),
+                ChatMsg("user", first)), 60).trim().trim('"', '\'', '.').take(48)
+            if (t.isNotBlank()) dao.rename(sid, t)
+        } catch (e: Exception) { /* keep the truncated first message as title */ }
+    }
+
+    // ---------- agent mode ----------
+    private suspend fun runAgent(task: String, s: Settings, sid: Long) {
+        if (!JarvisAccessibilityService.isEnabled(appCtx)) {
+            dao.insert(MessageEntity(sessionId = sid, role = "note", content = "Agent mode needs the JARVIS accessibility service. Enable it in Settings > Permissions and try again."))
+            return
+        }
+        AgentControl.stop = false
+        val steps = ArrayList<String>()
+        streaming.value = "```\nStarting...\n```"
+        if (s.autoVoice) tts.enqueue(if (s.language.startsWith("ar")) "تمام، أشتغل عليه." else "On it, sir.")
+        Notifier.agentStatus(appCtx, task.take(80))
+        val result = try {
+            agent.run(task, s) { line -> steps.add(line); streaming.value = "```\n" + steps.joinToString("\n") + "\n```" }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            "The agent stopped unexpectedly: ${e.message}"
+        } finally {
+            Notifier.cancel(appCtx, Notifier.ID_AGENT)
+            AgentControl.stop = false
+            withContext(NonCancellable) { streaming.value = null }
+        }
+        val text = result + if (steps.isNotEmpty()) "\n\n```steps\n" + steps.joinToString("\n") + "\n```" else ""
+        dao.insert(MessageEntity(sessionId = sid, role = "assistant", content = text))
+        // bring JARVIS back to the front and report
+        appCtx.startActivity(Intent(appCtx, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT))
+        if (s.autoVoice) tts.enqueue(cleanForSpeech(result))
+        if (!JarvisApp.foreground) Notifier.post(appCtx, "JARVIS", result.take(140))
+    }
+
     private fun systemPrompt(): String {
         val now = SimpleDateFormat("EEEE, d MMMM yyyy HH:mm", Locale.ENGLISH).format(Date())
-        return """You are J.A.R.V.I.S., a calm, dry-witted, extremely capable personal AI assistant living on the user's Android phone. Current date/time: $now.
+        return """You are J.A.R.V.I.S., a calm, dry-witted, extremely capable personal AI assistant living on the user's Android phone, in the style of the Iron Man films. Current date/time: $now.
 Personality: poised, courteous, concise, quietly confident; occasionally address the user as "sir" in English.
-Your replies are spoken aloud, so keep them short and natural. Avoid markdown, tables and emojis. Use plain sentences.
+Your replies are spoken aloud while they appear, so lead with a short natural spoken answer in plain sentences. Then, when helpful, add structure the screen can show:
+- ALWAYS put any code, commands, config or file contents in a fenced block with a language tag (```python, ```bash, ...). Code is displayed in a copyable box and is never read aloud, so introduce it in one sentence first.
+- Use short bullet or numbered lists, **bold** and ## headings only when they genuinely help. No emojis. Avoid long preambles.
 Reply in the language the user writes in. You understand Arabic including Iraqi and Saudi dialects; answer Arabic in simple, natural Arabic (match their dialect when sensible).
-You can explain, summarise, search your knowledge, plan and help with tasks. The app itself handles device commands (open apps, YouTube/Google search, flashlight, alarms, battery, volume, settings, notifications, timed reminders) before messages reach you; if the user asks for something the phone cannot do, say so honestly.
+You can explain, plan, write and debug code, summarise and help with tasks. The app handles device commands itself (open apps, YouTube/Google search, flashlight, alarms, battery, volume, settings, notifications, reminders). If the user asks you to operate other apps or do multi-step things on the phone, tell them to switch on Agent mode (the lightning button) and give the instruction. If asked what is on their screen, they can simply ask "what's on my screen".
 Never claim to have done a device action yourself. Never invent facts; say when you are unsure."""
     }
 
     override fun onCleared() {
         tts.shutdown()
         stt.destroy()
+    }
+
+    private companion object {
+        val SCREEN_Q = Regex(
+            "what(?:'s| is) on (?:my |the )?screen|read (?:my |the )?screen|describe (?:my |the )?screen|what am i looking at|summari[sz]e (?:this|my) screen|" +
+                "(?:وش|شنو|ايش|ماذا|ويش) (?:على|في|ب) ?(?:ال)?(?:شاشه|شاشتي)|اقرا (?:لي )?(?:ال)?شاشه|وصف (?:لي )?(?:ال)?شاشه"
+        )
     }
 }

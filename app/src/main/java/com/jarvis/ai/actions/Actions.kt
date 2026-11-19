@@ -242,28 +242,35 @@ class GoogleSearchAction : RegexAction("google_search", listOf(
     }
 }
 
-class OpenAppAction : RegexAction("open_app", listOf(
-    Regex("""^(?:open|launch) (?:the )?(?:app )?(.+)$"""),
-    Regex("""^(?:افتح|فتح|شغل|شغلي) (?:تطبيق )?(.+)$"""),
-)) {
+object AppLauncher {
     private val aliases = mapOf(
         "يوتيوب" to "youtube", "كروم" to "chrome", "واتساب" to "whatsapp", "الكاميره" to "camera",
         "الخرائط" to "maps", "تلغرام" to "telegram", "انستقرام" to "instagram", "سناب" to "snapchat",
         "تيك توك" to "tiktok", "الساعه" to "clock", "الحاسبه" to "calculator",
     )
 
-    override suspend fun execute(ctx: Context, args: List<String>): ActionResult {
-        val ar = isAr(args)
-        val raw = args[1].trim()
-        val name = aliases[raw] ?: raw
+    /** Finds an installed launcher app by (partial) label and opens it. */
+    fun open(ctx: Context, raw: String): Boolean {
+        val name = (aliases[ActionRegistry.normalize(raw)] ?: raw.trim()).lowercase()
+        if (name.isEmpty()) return false
         val pm = ctx.packageManager
         val apps = pm.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0)
         fun label(r: android.content.pm.ResolveInfo) = r.loadLabel(pm).toString().lowercase()
-        val best = apps.firstOrNull { label(it) == name } ?: apps.firstOrNull { label(it).contains(name) }
-        val found = best ?: return ActionResult("", false, handled = false)   // not an app command: let the AI answer
-        val intent = pm.getLaunchIntentForPackage(found.activityInfo.packageName)
-            ?: return ActionResult("", false, handled = false)
+        val best = apps.firstOrNull { label(it) == name } ?: apps.firstOrNull { label(it).contains(name) } ?: return false
+        val intent = pm.getLaunchIntentForPackage(best.activityInfo.packageName) ?: return false
         ctx.launch(intent)
-        return ActionResult(msg(ar, "Opening ${label(found)}.", "أفتح $raw."))
+        return true
+    }
+}
+
+class OpenAppAction : RegexAction("open_app", listOf(
+    Regex("""^(?:open|launch) (?:the )?(?:app )?(.+)$"""),
+    Regex("""^(?:افتح|فتح|شغل|شغلي) (?:تطبيق )?(.+)$"""),
+)) {
+    override suspend fun execute(ctx: Context, args: List<String>): ActionResult {
+        val raw = args[1].trim()
+        // not an installed app: let the AI answer instead
+        if (!AppLauncher.open(ctx, raw)) return ActionResult("", false, handled = false)
+        return ActionResult(msg(isAr(args), "Opening $raw.", "أفتح $raw."))
     }
 }

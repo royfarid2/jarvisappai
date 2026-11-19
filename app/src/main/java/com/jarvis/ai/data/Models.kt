@@ -18,12 +18,22 @@ data class Settings(
     val fishKey: String = "",
     val fishVoiceId: String = "612b878b113047d9a770c069c8b4fdfe",   // "Jarvis (MCU) J.A.R.V.I.S" on Fish Audio
     val fishModel: String = "s2.1-pro-free",
+    val visionModel: String = "qwen/qwen3.8-27b",
+    val agentVision: Boolean = false,    // let JARVIS send screenshots to the AI (off by default)
     val onboarded: Boolean = false,
 )
 
-@Entity(tableName = "messages")
+@Entity(tableName = "sessions")
+data class SessionEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val title: String,
+    val updatedAt: Long = System.currentTimeMillis(),
+)
+
+@Entity(tableName = "messages", indices = [Index("sessionId")])
 data class MessageEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val sessionId: Long = 0,
     val role: String,                    // user | assistant | note
     val content: String,
     val ts: Long = System.currentTimeMillis(),
@@ -31,12 +41,20 @@ data class MessageEntity(
 
 @Dao
 interface MessageDao {
-    @Query("SELECT * FROM messages ORDER BY id") fun observe(): Flow<List<MessageEntity>>
-    @Query("SELECT * FROM messages WHERE role IN ('user','assistant') ORDER BY id DESC LIMIT :n")
-    suspend fun last(n: Int): List<MessageEntity>
+    @Query("SELECT * FROM sessions ORDER BY updatedAt DESC") fun sessions(): Flow<List<SessionEntity>>
+    @Query("SELECT * FROM messages WHERE sessionId = :sid ORDER BY id") fun observe(sid: Long): Flow<List<MessageEntity>>
+    @Query("SELECT * FROM messages WHERE sessionId = :sid AND role IN ('user','assistant') ORDER BY id DESC LIMIT :n")
+    suspend fun last(sid: Long, n: Int): List<MessageEntity>
+    @Query("SELECT COUNT(*) FROM messages WHERE sessionId = :sid") suspend fun count(sid: Long): Int
     @Insert suspend fun insert(m: MessageEntity): Long
-    @Query("DELETE FROM messages") suspend fun clear()
+    @Insert suspend fun insertSession(s: SessionEntity): Long
+    @Query("UPDATE sessions SET title = :t WHERE id = :id") suspend fun rename(id: Long, t: String)
+    @Query("UPDATE sessions SET updatedAt = :ts WHERE id = :id") suspend fun touch(id: Long, ts: Long)
+    @Query("DELETE FROM messages WHERE sessionId = :sid") suspend fun deleteMessages(sid: Long)
+    @Query("DELETE FROM sessions WHERE id = :id") suspend fun deleteSession(id: Long)
+    @Query("DELETE FROM messages") suspend fun clearMessages()
+    @Query("DELETE FROM sessions") suspend fun clearSessions()
 }
 
-@Database(entities = [MessageEntity::class], version = 1, exportSchema = false)
+@Database(entities = [MessageEntity::class, SessionEntity::class], version = 2, exportSchema = false)
 abstract class AppDb : RoomDatabase() { abstract fun dao(): MessageDao }

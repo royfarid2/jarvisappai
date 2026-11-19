@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">JARVIS AI</string>
+    <string name="a11y_description">Lets JARVIS read what is on your screen and tap, type and scroll for you, only when you give it a task in Agent mode. You can turn this off at any time.</string>
 </resources>

@@ -19,7 +19,10 @@ import java.io.File
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 
-/** Minimal OpenAI-compatible client: /chat/completions (SSE streaming), /models, /audio/speech. */
+/** A chat message; [imageB64] (JPEG, base64) is sent as an image for vision models. */
+data class ChatMsg(val role: String, val content: String, val imageB64: String? = null)
+
+/** OpenAI-compatible client (Groq etc.): streaming chat, one-shot chat, /models, plus Fish Audio TTS. */
 class ApiClient {
     private val http = OkHttpClient.Builder()
         .connectTimeout(20, TimeUnit.SECONDS)
@@ -38,9 +41,16 @@ class ApiClient {
         }
     }
 
-    private fun chatBody(s: Settings, msgs: List<Pair<String, String>>, stream: Boolean, maxTokens: Int? = null): String {
+    private fun msgJson(m: ChatMsg): JSONObject =
+        if (m.imageB64 == null) JSONObject().put("role", m.role).put("content", m.content)
+        else JSONObject().put("role", m.role).put("content", JSONArray()
+            .put(JSONObject().put("type", "text").put("text", m.content))
+            .put(JSONObject().put("type", "image_url")
+                .put("image_url", JSONObject().put("url", "data:image/jpeg;base64," + m.imageB64))))
+
+    private fun chatBody(s: Settings, msgs: List<ChatMsg>, stream: Boolean, maxTokens: Int? = null): String {
         val arr = JSONArray()
-        msgs.forEach { arr.put(JSONObject().put("role", it.first).put("content", it.second)) }
+        msgs.forEach { arr.put(msgJson(it)) }
         return JSONObject().put("model", s.model).put("stream", stream).put("messages", arr)
             .apply {
                 if (maxTokens != null) put("max_tokens", maxTokens)
@@ -49,7 +59,7 @@ class ApiClient {
             }.toString()
     }
 
-    fun chatStream(s: Settings, msgs: List<Pair<String, String>>): Flow<String> = flow {
+    fun chatStream(s: Settings, msgs: List<ChatMsg>): Flow<String> = flow {
         val call = http.newCall(req(s, "/chat/completions").post(chatBody(s, msgs, true).toRequestBody(json)).build())
         currentCoroutineContext()[Job]?.invokeOnCompletion { call.cancel() }
         call.execute().use { resp ->
@@ -71,6 +81,16 @@ class ApiClient {
         }
     }.flowOn(Dispatchers.IO)
 
+    /** Non-streaming completion; returns the assistant text. */
+    suspend fun chatOnce(s: Settings, msgs: List<ChatMsg>, maxTokens: Int = 1500): String = withContext(Dispatchers.IO) {
+        http.newCall(req(s, "/chat/completions").post(chatBody(s, msgs, false, maxTokens).toRequestBody(json)).build())
+            .execute().use { r ->
+                val txt = r.body?.string().orEmpty()
+                if (!r.isSuccessful) throw IOException("HTTP ${r.code}: ${txt.take(300)}")
+                JSONObject(txt).getJSONArray("choices").getJSONObject(0).getJSONObject("message").optString("content", "")
+            }
+    }
+
     /** Returns the list of model ids (may be empty if the server has no /models route). */
     suspend fun test(s: Settings): Result<List<String>> = withContext(Dispatchers.IO) {
         runCatching {
@@ -83,7 +103,7 @@ class ApiClient {
                 }
             } catch (e: Exception) { null }
             if (models != null) return@runCatching models
-            val body = chatBody(s, listOf("user" to "ping"), false, 1).toRequestBody(json)
+            val body = chatBody(s, listOf(ChatMsg("user", "ping")), false, 1).toRequestBody(json)
             http.newCall(req(s, "/chat/completions").post(body).build()).execute().use { r ->
                 if (!r.isSuccessful) throw IOException("HTTP ${r.code}: ${r.body?.string()?.take(200)}")
             }

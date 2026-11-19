@@ -15,14 +15,16 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import java.io.File
 import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.coroutines.resume
 
 /**
- * Speech output. Two engines:
- *  1. Android TextToSpeech - picks a British (en-GB) male voice, low pitch by default.
- *  2. Fish Audio cloud TTS (JARVIS voice model) when a Fish key is configured; falls back to 1 on failure.
- * Chunks are queued so speech starts while the reply is still streaming.
+ * Speech output with text/voice sync.
+ *  - Fish Audio cloud voice when a key is set (synthesis of the next sentence overlaps playback of the current one),
+ *    otherwise / on failure the Android TextToSpeech engine (en-GB male preferred).
+ *  - Each chunk can carry an [onStart] callback, fired on the main thread the moment that chunk begins to be heard,
+ *    with its duration in ms. The UI uses it to reveal text exactly in step with the voice.
  */
 class TtsManager(
     ctx: Context,
@@ -30,6 +32,10 @@ class TtsManager(
 ) {
     @Volatile var settings = Settings()
     var onIdle: (() -> Unit)? = null
+
+    private class Chunk(val text: String, val onStart: ((Long) -> Unit)?)
+    private class Ready(val chunk: Chunk, val file: File?)
+    private class LocalCb(val len: Int, val cb: ((Long) -> Unit)?)
 
     private val main = Handler(Looper.getMainLooper())
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -39,18 +45,25 @@ class TtsManager(
     val voices: StateFlow<List<Voice>> = _voices
 
     private val pending = AtomicInteger(0)
-    private val queue = Channel<String>(Channel.UNLIMITED)
-    private var worker: Job? = null
+    private val synthQueue = Channel<Chunk>(Channel.UNLIMITED)
+    private val readyQueue = Channel<Ready>(Channel.UNLIMITED)
+    private val localCbs = ConcurrentHashMap<String, LocalCb>()
+    private var synthJob: Job? = null
+    private var playJob: Job? = null
     private var player: MediaPlayer? = null
     @Volatile private var ready = false
     private var tts: TextToSpeech? = null
 
     private val listener = object : UtteranceProgressListener() {
-        override fun onStart(utteranceId: String?) {}
+        override fun onStart(utteranceId: String?) {
+            val c = localCbs.remove(utteranceId ?: return) ?: return
+            val dur = (c.len * 62L / settings.rate.coerceAtLeast(0.5f)).toLong()
+            main.post { c.cb?.invoke(dur) }
+        }
         override fun onDone(utteranceId: String?) { finishOne() }
         @Deprecated("Deprecated in Java")
-        override fun onError(utteranceId: String?) { finishOne() }
-        override fun onError(utteranceId: String?, errorCode: Int) { finishOne() }
+        override fun onError(utteranceId: String?) { utteranceId?.let { localCbs.remove(it) }; finishOne() }
+        override fun onError(utteranceId: String?, errorCode: Int) { utteranceId?.let { localCbs.remove(it) }; finishOne() }
         override fun onStop(utteranceId: String?, interrupted: Boolean) {}
     }
 
@@ -66,7 +79,7 @@ class TtsManager(
                 } catch (e: Exception) { /* some engines throw here */ }
             }
         }
-        startWorker()
+        startWorkers()
     }
 
     private fun finishOne() {
@@ -76,49 +89,63 @@ class TtsManager(
         }
     }
 
-    fun enqueue(text: String) {
+    /** Queue [text] for speech. Blank text is a silent beat that still fires [onStart] in order. */
+    fun enqueue(text: String, onStart: ((Long) -> Unit)? = null) {
         val t = text.trim()
-        if (t.isEmpty()) return
+        if (t.isEmpty() && onStart == null) return
         pending.incrementAndGet()
         _speaking.value = true
-        if (settings.cloudTts && settings.fishKey.isNotBlank()) queue.trySend(t) else speakLocal(t)
+        if (settings.cloudTts && settings.fishKey.isNotBlank()) synthQueue.trySend(Chunk(t, onStart))
+        else speakLocal(t, onStart)
     }
 
     fun stop() {
         pending.set(0)
         tts?.stop()
-        worker?.cancel()
-        while (queue.tryReceive().isSuccess) { /* drain */ }
+        localCbs.clear()
+        synthJob?.cancel(); playJob?.cancel()
+        while (synthQueue.tryReceive().isSuccess) { /* drain */ }
+        while (true) { val r = readyQueue.tryReceive().getOrNull() ?: break; r.file?.delete() }
         try { player?.release() } catch (e: Exception) { }
         player = null
-        startWorker()
+        startWorkers()
         _speaking.value = false
     }
 
     fun shutdown() {
-        stop(); worker?.cancel(); tts?.shutdown(); scope.cancel()
+        stop(); synthJob?.cancel(); playJob?.cancel(); tts?.shutdown(); scope.cancel()
     }
 
-    private fun startWorker() {
-        worker = scope.launch {
-            for (t in queue) {
-                val f = try { cloudSynth(settings, t) }
+    private fun startWorkers() {
+        // Stage 1: synthesize ahead of playback.
+        synthJob = scope.launch {
+            for (c in synthQueue) {
+                val f = if (c.text.isEmpty()) null else try { cloudSynth(settings, c.text) }
                 catch (e: CancellationException) { throw e }
                 catch (e: Exception) { null }
-                if (f != null) {
-                    try { play(f) }
-                    catch (e: CancellationException) { throw e }
-                    catch (e: Exception) { /* skip chunk */ }
-                    finally { f.delete() }
-                    finishOne()
-                } else {
-                    speakLocal(t)   // graceful fallback to on-device voice
+                readyQueue.send(Ready(c, f))
+            }
+        }
+        // Stage 2: play in order.
+        playJob = scope.launch {
+            for (r in readyQueue) {
+                val c = r.chunk
+                when {
+                    c.text.isEmpty() -> { c.onStart?.invoke(0); finishOne() }
+                    r.file != null -> {
+                        try { play(r.file, c.onStart) }
+                        catch (e: CancellationException) { throw e }
+                        catch (e: Exception) { c.onStart?.invoke(0) }
+                        finally { r.file.delete() }
+                        finishOne()
+                    }
+                    else -> speakLocal(c.text, c.onStart)   // graceful fallback to the on-device voice
                 }
             }
         }
     }
 
-    private suspend fun play(f: File) = suspendCancellableCoroutine<Unit> { cont ->
+    private suspend fun play(f: File, onStart: ((Long) -> Unit)?) = suspendCancellableCoroutine<Unit> { cont ->
         val mp = MediaPlayer()
         player = mp
         mp.setAudioAttributes(
@@ -127,7 +154,7 @@ class TtsManager(
                 .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build()
         )
         mp.setDataSource(f.absolutePath)
-        mp.setOnPreparedListener { it.start() }
+        mp.setOnPreparedListener { m -> onStart?.invoke(m.duration.toLong()); m.start() }
         mp.setOnCompletionListener { m ->
             m.release(); if (player === m) player = null
             if (cont.isActive) cont.resume(Unit)
@@ -141,9 +168,15 @@ class TtsManager(
         mp.prepareAsync()
     }
 
-    private fun speakLocal(text: String) {
+    private fun speakLocal(text: String, onStart: ((Long) -> Unit)?) {
         val t = tts
-        if (!ready || t == null) { finishOne(); return }
+        if (!ready || t == null) { onStart?.invoke(0); finishOne(); return }
+        val id = "j${System.nanoTime()}"
+        localCbs[id] = LocalCb(text.length, onStart)
+        if (text.isEmpty()) {
+            if (t.playSilentUtterance(1, TextToSpeech.QUEUE_ADD, id) == TextToSpeech.ERROR) { localCbs.remove(id); onStart?.invoke(0); finishOne() }
+            return
+        }
         val s = settings
         t.setSpeechRate(s.rate)
         t.setPitch(s.pitch)
@@ -155,8 +188,9 @@ class TtsManager(
             val v = pickVoice(t, s)
             if (v != null) t.setVoice(v) else t.setLanguage(Locale.UK)
         }
-        val r = t.speak(text, TextToSpeech.QUEUE_ADD, null, "j${System.nanoTime()}")
-        if (r == TextToSpeech.ERROR) finishOne()
+        if (t.speak(text, TextToSpeech.QUEUE_ADD, null, id) == TextToSpeech.ERROR) {
+            localCbs.remove(id); onStart?.invoke(0); finishOne()
+        }
     }
 
     private fun pickVoice(t: TextToSpeech, s: Settings): Voice? {
