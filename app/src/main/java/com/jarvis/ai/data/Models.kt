@@ -19,7 +19,9 @@ data class Settings(
     val fishVoiceId: String = "612b878b113047d9a770c069c8b4fdfe",   // "Jarvis (MCU) J.A.R.V.I.S" on Fish Audio
     val fishModel: String = "s2.1-pro-free",
     val visionModel: String = "qwen/qwen3.8-27b",
-    val agentVision: Boolean = false,    // let JARVIS send screenshots to the AI (off by default)
+    val agentVision: Boolean = true,     // let JARVIS send screenshots to the AI when text alone is not enough
+    val hotword: Boolean = false,        // always-listening "Jarvis" wake word
+    val picovoiceKey: String = "",       // Picovoice AccessKey (free) for the wake word engine
     val onboarded: Boolean = false,
 )
 

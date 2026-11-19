@@ -36,7 +36,7 @@ class JarvisAccessibilityService : AccessibilityService() {
         val list = ArrayList<AccessibilityNodeInfo>()
         val sb = StringBuilder()
         fun walk(n: AccessibilityNodeInfo?) {
-            if (n == null || list.size >= 150 || !n.isVisibleToUser) return
+            if (n == null || list.size >= 220 || !n.isVisibleToUser) return
             val pwd = n.isPassword
             val t = if (pwd) "[hidden]" else n.text?.toString()?.replace('\n', ' ')?.take(90)
             val d = if (pwd) null else n.contentDescription?.toString()?.replace('\n', ' ')?.take(90)
@@ -50,6 +50,10 @@ class JarvisAccessibilityService : AccessibilityService() {
                 if (n.isEditable) sb.append(" [input]")
                 if (n.isScrollable) sb.append(" [scrollable]")
                 if (n.isChecked) sb.append(" [checked]")
+                if (n.isClickable || n.isEditable) {
+                    val r = Rect(); n.getBoundsInScreen(r)
+                    sb.append(" @").append(r.centerX()).append(',').append(r.centerY())
+                }
                 sb.append('\n')
                 list.add(n)
             }
@@ -113,6 +117,41 @@ class JarvisAccessibilityService : AccessibilityService() {
         }
         return performGlobalAction(action)
     }
+
+    fun longPress(s: Snapshot, i: Int): Boolean {
+        val target = s.nodes.getOrNull(i) ?: return false
+        target.refresh()
+        var n: AccessibilityNodeInfo? = target
+        while (n != null && !n.isLongClickable) n = n.parent
+        if (n != null && n.performAction(AccessibilityNodeInfo.ACTION_LONG_CLICK)) return true
+        val r = Rect(); target.getBoundsInScreen(r)
+        return gesture(Path().apply { moveTo(r.exactCenterX(), r.exactCenterY()) }, 800)
+    }
+
+    fun tapXY(x: Float, y: Float): Boolean = tap(x, y)
+
+    /** Press the keyboard's Enter / Search / Send key for the focused input (Android 11+). */
+    fun imeEnter(s: Snapshot, i: Int): Boolean {
+        if (Build.VERSION.SDK_INT < 30) return false
+        val n = s.nodes.getOrNull(i) ?: return false
+        n.refresh()
+        return n.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.id)
+    }
+
+    /** Finger swipe in a direction (left/right are used for side drawers, member lists, pagers...). */
+    fun swipeDir(dir: String): Boolean {
+        val dm = resources.displayMetrics
+        val w = dm.widthPixels.toFloat(); val h = dm.heightPixels.toFloat()
+        return when (dir) {
+            "left" -> swipe(w * 0.85f, h * 0.5f, w * 0.15f, h * 0.5f)
+            "right" -> swipe(w * 0.05f, h * 0.5f, w * 0.85f, h * 0.5f)
+            "up" -> swipe(w / 2, h * 0.75f, w / 2, h * 0.25f)
+            "down" -> swipe(w / 2, h * 0.25f, w / 2, h * 0.75f)
+            else -> false
+        }
+    }
+
+    fun screenSize(): Pair<Int, Int> = resources.displayMetrics.let { it.widthPixels to it.heightPixels }
 
     private fun tap(x: Float, y: Float) = gesture(Path().apply { moveTo(x, y) }, 60)
     private fun swipe(x1: Float, y1: Float, x2: Float, y2: Float) = gesture(Path().apply { moveTo(x1, y1); lineTo(x2, y2) }, 350)

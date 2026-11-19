@@ -10,6 +10,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
@@ -73,22 +75,31 @@ fun ChatScreen(vm: MainViewModel, s: Settings, openSettings: () -> Unit) {
     )
     if (askAgent) AlertDialog(
         onDismissRequest = { askAgent = false },
-        title = { Text("Enable Agent mode") },
+        title = { Text("Enable JARVIS control") },
         text = {
-            Text(
-                "Agent mode lets JARVIS read your screen and tap, type and scroll in other apps, only for tasks you give it. " +
-                    "It never types passwords, asks you before sensitive taps (send, pay, delete), and you can stop it any time from the notification.\n\n" +
-                    "Screen text is sent to your AI provider to decide each step. You turn this on yourself in Android's Accessibility settings. " +
-                    "On Android 13+ you may first need: App info > ⋮ > Allow restricted settings."
-            )
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                Text(
+                    "JARVIS reads your screen and taps, types and scrolls in other apps, only for tasks you give it. " +
+                        "It never types passwords, asks before payments or deletions, and you can stop it from the notification. " +
+                        "Screen text is sent to your AI provider to decide each step.\n\n" +
+                        "Android blocks this for apps installed from an APK until you allow it:\n" +
+                        "1. Tap \"App info\" > menu (⋮, top right) > Allow restricted settings. If ⋮ isn't there, first try enabling the service once, then come back.\n" +
+                        "2. Tap \"Accessibility\" > JARVIS AI > turn on."
+                )
+            }
         },
         confirmButton = {
             TextButton({
                 askAgent = false
                 ctx.startActivity(Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-            }) { Text("Open Accessibility settings") }
+            }) { Text("Accessibility") }
         },
-        dismissButton = { TextButton({ askAgent = false }) { Text("Cancel") } },
+        dismissButton = {
+            TextButton({
+                askAgent = false
+                ctx.startActivity(Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.parse("package:" + ctx.packageName)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            }) { Text("App info") }
+        },
     )
     renaming?.let { (id, title) ->
         var t by remember(id) { mutableStateOf(title) }
@@ -229,7 +240,7 @@ fun ChatScreen(vm: MainViewModel, s: Settings, openSettings: () -> Unit) {
                         Spacer(Modifier.width(8.dp))
                         TextField(
                             input, { input = it }, Modifier.weight(1f),
-                            placeholder = { Text(if (agentOn) "Tell JARVIS what to do on your phone" else "Message JARVIS") }, maxLines = 5,
+                            placeholder = { Text(if (agentOn) "Tell JARVIS what to do on your phone" else "Message JARVIS (or ask it to do something)") }, maxLines = 5,
                             shape = RoundedCornerShape(24.dp),
                             colors = TextFieldDefaults.colors(
                                 focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
@@ -293,7 +304,7 @@ private fun EmptyState(onSuggest: (String) -> Unit) {
         Spacer(Modifier.height(24.dp))
         Text("At your service.", style = MaterialTheme.typography.headlineMedium)
         Spacer(Modifier.height(20.dp))
-        listOf("Write a Python script that renames files", "What's my battery percentage?", "Search YouTube for Minecraft tutorials", "What's on my screen?").forEach {
+        listOf("Write a Python script that renames files", "Play music on Spotify", "How many members are in my Discord server?", "What's on my screen?").forEach {
             Surface(
                 Modifier.padding(vertical = 4.dp).clickable { onSuggest(it) },
                 shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),

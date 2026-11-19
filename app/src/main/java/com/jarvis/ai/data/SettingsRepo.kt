@@ -29,6 +29,10 @@ class SecureStore(private val ctx: Context) {
         get() = prefs.getString("api_key", "") ?: ""
         set(v) { prefs.edit().putString("api_key", v).apply() }
 
+    var picovoiceKey: String
+        get() = prefs.getString("picovoice_key", "") ?: ""
+        set(v) { prefs.edit().putString("picovoice_key", v).apply() }
+
     var fishKey: String
         get() = prefs.getString("fish_key", "") ?: ""
         set(v) { prefs.edit().putString("fish_key", v).apply() }
@@ -59,6 +63,8 @@ class SettingsRepo(private val ctx: Context) {
             fishModel = p[FISH_MODEL] ?: d.fishModel,
             visionModel = p[VISION_MODEL] ?: d.visionModel,
             agentVision = p[AGENT_VISION] ?: d.agentVision,
+            hotword = p[HOTWORD] ?: d.hotword,
+            picovoiceKey = secure.picovoiceKey,
             onboarded = p[ONBOARDED] ?: d.onboarded,
         )
     }
@@ -66,12 +72,13 @@ class SettingsRepo(private val ctx: Context) {
     suspend fun save(s: Settings) = withContext(Dispatchers.IO) {
         secure.apiKey = s.apiKey.trim()
         secure.fishKey = s.fishKey.trim()
+        secure.picovoiceKey = s.picovoiceKey.trim()
         ctx.dataStore.edit { p ->
             p[ENDPOINT] = s.endpoint.trim(); p[MODEL] = s.model.trim(); p[VOICE] = s.voiceName
             p[RATE] = s.rate; p[PITCH] = s.pitch; p[LANG] = s.language; p[DARK] = s.dark
             p[AUTO_VOICE] = s.autoVoice; p[HANDS_FREE] = s.handsFree; p[CLOUD] = s.cloudTts
             p[FISH_VOICE] = s.fishVoiceId.trim(); p[FISH_MODEL] = s.fishModel.trim()
-            p[VISION_MODEL] = s.visionModel.trim(); p[AGENT_VISION] = s.agentVision
+            p[VISION_MODEL] = s.visionModel.trim(); p[AGENT_VISION] = s.agentVision; p[HOTWORD] = s.hotword
             p[ONBOARDED] = s.onboarded
         }
     }
@@ -92,5 +99,6 @@ class SettingsRepo(private val ctx: Context) {
         val ONBOARDED = booleanPreferencesKey("onboarded")
         val VISION_MODEL = stringPreferencesKey("vision_model")
         val AGENT_VISION = booleanPreferencesKey("agent_vision")
+        val HOTWORD = booleanPreferencesKey("hotword")
     }
 }

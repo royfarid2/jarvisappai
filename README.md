@@ -22,8 +22,15 @@ OpenAI-compatible AI, hear replies in a British male voice, and control parts of
 - Replies render markdown. **Code goes in boxed blocks with a Copy button** and is never read aloud; headings, lists,
   bold and quotes are formatted. Long-press text to select.
 
+## Hey JARVIS (wake word + assistant panel)
+Turn on *Listen for "Jarvis"* in Settings, paste a free Picovoice AccessKey, allow *Display over other apps* and set battery
+to unrestricted. Say "Hey Jarvis" from any app: a bottom panel (like Google Assistant) opens and listens. Requests that
+need the phone ("play this on Spotify", "message Sara on WhatsApp", "how many members are in my Discord server Denial")
+are routed to the agent automatically; the panel steps aside while it works and reports back by voice.
+Android 14+ only lets a microphone service start while the app is open, so open JARVIS once after a reboot.
+
 ## Agent mode (the lightning button)
-Turn it on, then tell JARVIS what to do ("open WhatsApp and message Sara hello"). It reads the screen through the
+The bolt forces every message to be treated as an agent task (otherwise JARVIS decides automatically). Tell JARVIS what to do ("open WhatsApp and message Sara hello"). It reads the screen through the
 Android **Accessibility Service**, then taps, types, scrolls and opens apps step by step (max 20 steps).
 Safety: you enable the service yourself in Android settings; it only runs for tasks you give it; passwords are never
 read or typed; sensitive taps (send, pay, buy, delete, post...) need your Allow/Deny on a notification; a Stop button is

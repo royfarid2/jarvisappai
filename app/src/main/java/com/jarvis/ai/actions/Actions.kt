@@ -80,7 +80,8 @@ object ActionRegistry {
 }
 
 private fun isAr(args: List<String>) = args.firstOrNull()?.any { it in '\u0600'..'\u06FF' } == true
-private fun msg(ar: Boolean, en: String, arabic: String) = if (ar) arabic else en
+/** JARVIS always answers in English (Arabic commands are still understood). */
+private fun msg(@Suppress("UNUSED_PARAMETER") ar: Boolean, en: String, @Suppress("UNUSED_PARAMETER") arabic: String) = en
 private fun Context.launch(i: Intent) = startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
 
 class FlashlightAction : RegexAction("flashlight", listOf(
@@ -150,8 +151,7 @@ class BatteryAction : RegexAction("battery", listOf(
         val st = ctx.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))?.getIntExtra(BatteryManager.EXTRA_STATUS, -1)
         val charging = st == BatteryManager.BATTERY_STATUS_CHARGING || st == BatteryManager.BATTERY_STATUS_FULL
         return ActionResult(
-            if (ar) "البطارية $pct%${if (charging) " وهي تشحن" else ""}."
-            else "Battery is at $pct percent${if (charging) " and charging" else ""}."
+            "Battery is at $pct percent${if (charging) " and charging" else ""}."
         )
     }
 }
@@ -248,6 +248,16 @@ object AppLauncher {
         "الخرائط" to "maps", "تلغرام" to "telegram", "انستقرام" to "instagram", "سناب" to "snapchat",
         "تيك توك" to "tiktok", "الساعه" to "clock", "الحاسبه" to "calculator",
     )
+
+    /** Package name of an installed launcher app matching [raw] (label), or null. */
+    fun packageFor(ctx: Context, raw: String): String? {
+        val name = (aliases[ActionRegistry.normalize(raw)] ?: raw.trim()).lowercase()
+        if (name.isEmpty()) return null
+        val pm = ctx.packageManager
+        val apps = pm.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0)
+        fun label(r: android.content.pm.ResolveInfo) = r.loadLabel(pm).toString().lowercase()
+        return (apps.firstOrNull { label(it) == name } ?: apps.firstOrNull { label(it).contains(name) })?.activityInfo?.packageName
+    }
 
     /** Finds an installed launcher app by (partial) label and opens it. */
     fun open(ctx: Context, raw: String): Boolean {

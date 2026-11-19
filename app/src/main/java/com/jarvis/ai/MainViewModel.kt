@@ -7,6 +7,8 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.jarvis.ai.actions.ActionRegistry
 import com.jarvis.ai.actions.ActionResult
+import com.jarvis.ai.assist.AssistLauncher
+import com.jarvis.ai.assist.HotwordService
 import com.jarvis.ai.agent.AgentControl
 import com.jarvis.ai.agent.AgentRunner
 import com.jarvis.ai.agent.JarvisAccessibilityService
@@ -68,7 +70,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val busy = MutableStateFlow(false)
     val toast = MutableStateFlow<String?>(null)
     val test = MutableStateFlow(TestUi())
-    val agentMode = MutableStateFlow(false)
+    val agentMode = MutableStateFlow(false)       // true = every message is an agent task; false = auto-route
+    val agentRunning = MutableStateFlow(false)
+    private var assistOpen = false
+    private var originAssist = false
 
     private var job: Job? = null
     private var voiceSession = false
@@ -88,13 +93,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             repo.save(s)
             tts.settings = s
             settings.value = s
+            if (s.hotword && s.picovoiceKey.isNotBlank()) HotwordService.start(appCtx) else HotwordService.stop(appCtx)
         }
     }
 
     fun previewVoice(draft: Settings) {
         tts.stop()
         tts.settings = draft
-        tts.enqueue(if (draft.language.startsWith("ar")) "مرحباً، أنا جارفس. كيف أقدر أساعدك؟" else "Good evening, sir. All systems are online and ready.")
+        tts.enqueue("Good evening, sir. All systems are online and ready.")
     }
 
     fun testConnection(draft: Settings) {
@@ -116,7 +122,23 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         greeted = true
         val h = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
         val part = when { h < 5 -> "evening"; h < 12 -> "morning"; h < 18 -> "afternoon"; else -> "evening" }
-        tts.enqueue(if (s.language.startsWith("ar")) "مرحباً. جميع الأنظمة تعمل، كيف أقدر أخدمك؟" else "Good $part, sir. All systems are online. How may I assist you?")
+        tts.enqueue("Good $part, sir. All systems are online. How may I assist you?")
+    }
+
+    /** Hey-JARVIS panel opened: fresh chat, start listening at once. */
+    fun assistStart() {
+        val s = settings.value ?: return
+        assistOpen = true
+        if (busy.value) return
+        tts.stop()
+        newChat()
+        startListening(s)
+    }
+
+    /** Panel closed: stop listening/speaking unless an agent task is carrying on in the background. */
+    fun assistEnd() {
+        assistOpen = false
+        if (!agentRunning.value) { stt.stop(); tts.stop() }
     }
 
     fun say(m: String) { toast.value = m }
@@ -198,6 +220,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         dao.insert(MessageEntity(sessionId = sid, role = "user", content = text))
         dao.touch(sid, System.currentTimeMillis())
         try {
+            originAssist = assistOpen
             if (agentMode.value) { runAgent(text, s, sid); return }
             if (SCREEN_Q.containsMatchIn(ActionRegistry.normalize(text))) { chat(s, sid, screen = true); return }
             val match = ActionRegistry.find(text)
@@ -212,6 +235,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     return
                 }
             }
+            if (needsDeviceControl(text) && JarvisAccessibilityService.isEnabled(appCtx)) { runAgent(text, s, sid); return }
             chat(s, sid, screen = false)
             if (isNew) titleFor(s, sid)
         } finally {
@@ -360,12 +384,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
         AgentControl.stop = false
+        agentRunning.value = true
         val steps = ArrayList<String>()
         streaming.value = "```\nStarting...\n```"
-        if (s.autoVoice) tts.enqueue(if (s.language.startsWith("ar")) "تمام، أشتغل عليه." else "On it, sir.")
+        if (s.autoVoice) tts.enqueue("On it, sir.")
         Notifier.agentStatus(appCtx, task.take(80))
         val result = try {
-            agent.run(task, s) { line -> steps.add(line); streaming.value = "```\n" + steps.joinToString("\n") + "\n```" }
+            agent.run(task, s) { line ->
+                steps.add(line)
+                streaming.value = "```\n" + steps.joinToString("\n") + "\n```"
+                Notifier.agentStatus(appCtx, line)
+            }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -373,13 +402,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         } finally {
             Notifier.cancel(appCtx, Notifier.ID_AGENT)
             AgentControl.stop = false
+            agentRunning.value = false
             withContext(NonCancellable) { streaming.value = null }
         }
         val text = result + if (steps.isNotEmpty()) "\n\n```steps\n" + steps.joinToString("\n") + "\n```" else ""
         dao.insert(MessageEntity(sessionId = sid, role = "assistant", content = text))
-        // bring JARVIS back to the front and report
-        appCtx.startActivity(Intent(appCtx, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT))
+        // report back: the Hey-JARVIS panel if that is where the request came from, otherwise the app
         if (s.autoVoice) tts.enqueue(cleanForSpeech(result))
+        if (originAssist) AssistLauncher.show(appCtx, resultOnly = true)
+        else try {
+            appCtx.startActivity(Intent(appCtx, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT))
+        } catch (e: Exception) { /* background start blocked: the notification below still reports */ }
         if (!JarvisApp.foreground) Notifier.post(appCtx, "JARVIS", result.take(140))
     }
 
@@ -390,8 +423,8 @@ Personality: poised, courteous, concise, quietly confident; occasionally address
 Your replies are spoken aloud while they appear, so lead with a short natural spoken answer in plain sentences. Then, when helpful, add structure the screen can show:
 - ALWAYS put any code, commands, config or file contents in a fenced block with a language tag (```python, ```bash, ...). Code is displayed in a copyable box and is never read aloud, so introduce it in one sentence first.
 - Use short bullet or numbered lists, **bold** and ## headings only when they genuinely help. No emojis. Avoid long preambles.
-Reply in the language the user writes in. You understand Arabic including Iraqi and Saudi dialects; answer Arabic in simple, natural Arabic (match their dialect when sensible).
-You can explain, plan, write and debug code, summarise and help with tasks. The app handles device commands itself (open apps, YouTube/Google search, flashlight, alarms, battery, volume, settings, notifications, reminders). If the user asks you to operate other apps or do multi-step things on the phone, tell them to switch on Agent mode (the lightning button) and give the instruction. If asked what is on their screen, they can simply ask "what's on my screen".
+ALWAYS reply in English only, whatever language the user writes or speaks. You understand Arabic perfectly, including Iraqi and Saudi dialects, but every reply you give is in English.
+You can explain, plan, write and debug code, summarise and help with tasks. The app handles device commands itself (open apps, YouTube/Google search, flashlight, alarms, battery, volume, settings, notifications, reminders). You can operate the phone for the user (open apps, play songs, send messages, read information inside apps such as Discord): requests like that are carried out automatically once the JARVIS accessibility service is enabled. If it isn't enabled, tell the user to enable it in Settings > Permissions. If asked what is on their screen, they can simply ask "what's on my screen".
 Never claim to have done a device action yourself. Never invent facts; say when you are unsure."""
     }
 
@@ -400,7 +433,29 @@ Never claim to have done a device action yourself. Never invent facts; say when 
         stt.destroy()
     }
 
+    private val appLabels: List<String> by lazy {
+        try {
+            val pm = appCtx.packageManager
+            pm.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0)
+                .map { it.loadLabel(pm).toString().lowercase() }.filter { it.length >= 3 }.distinct()
+        } catch (e: Exception) { emptyList() }
+    }
+
+    /** Does this request mean "operate the phone / apps" rather than "chat"? */
+    private fun needsDeviceControl(text: String): Boolean {
+        val t = ActionRegistry.normalize(text)
+        if (DEVICE_VERBS.containsMatchIn(t)) return true
+        return appLabels.any { l ->
+            Regex("\\b(?:on|in|from|using|via|inside|within)\\s+(?:my\\s+|the\\s+)?" + Regex.escape(l) + "\\b").containsMatchIn(t)
+        }
+    }
+
     private companion object {
+        val DEVICE_VERBS = Regex(
+            "^(?:play|pause|resume|skip|launch|go to|navigate to|message|text|dm|call|ring|send|reply|post|tweet|follow|subscribe|" +
+                "take a screenshot|scroll|tap|click|join|mute|unmute|check my|read my|show me my|" +
+                "how many (?:members|followers|subscribers|friends|messages|likes|views|unread)|who (?:messaged|texted|called))\\b"
+        )
         val SCREEN_Q = Regex(
             "what(?:'s| is) on (?:my |the )?screen|read (?:my |the )?screen|describe (?:my |the )?screen|what am i looking at|summari[sz]e (?:this|my) screen|" +
                 "(?:وش|شنو|ايش|ماذا|ويش) (?:على|في|ب) ?(?:ال)?(?:شاشه|شاشتي)|اقرا (?:لي )?(?:ال)?شاشه|وصف (?:لي )?(?:ال)?شاشه"

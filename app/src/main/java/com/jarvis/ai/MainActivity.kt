@@ -4,16 +4,23 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.lifecycleScope
+import com.jarvis.ai.assist.HotwordService
 import com.jarvis.ai.ui.JarvisRoot
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        setContent {
-            val vm: MainViewModel = viewModel()
-            JarvisRoot(vm)
+        val vm = (application as JarvisApp).core()
+        setContent { JarvisRoot(vm) }
+        // keep the wake-word listener alive across app restarts (a microphone service may only start while the app is visible)
+        lifecycleScope.launch {
+            val s = vm.settings.filterNotNull().first()
+            if (s.hotword && s.picovoiceKey.isNotBlank()) HotwordService.start(this@MainActivity)
         }
     }
 

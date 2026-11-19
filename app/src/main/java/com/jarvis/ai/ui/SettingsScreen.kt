@@ -22,6 +22,7 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import com.jarvis.ai.JarvisNotificationListener
 import com.jarvis.ai.agent.JarvisAccessibilityService
+import com.jarvis.ai.assist.HotwordService
 import com.jarvis.ai.MainViewModel
 import com.jarvis.ai.data.Settings
 
@@ -42,6 +43,7 @@ fun SettingsScreen(vm: MainViewModel, current: Settings, onBack: () -> Unit) {
     }
     val listenerOn = remember(refresh) { refresh.let { JarvisNotificationListener.isEnabled(ctx) } }
     val a11yOn = remember(refresh) { refresh.let { JarvisAccessibilityService.isEnabled(ctx) } }
+    val overlayOn = remember(refresh) { refresh.let { android.provider.Settings.canDrawOverlays(ctx) } }
     val micOn = remember(refresh) { ContextCompat.checkSelfPermission(ctx, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED }
 
     if (confirmClear) AlertDialog(
@@ -104,8 +106,32 @@ fun SettingsScreen(vm: MainViewModel, current: Settings, onBack: () -> Unit) {
             VoiceFields(d) { d = it }
             OutlinedButton({ vm.previewVoice(d) }, Modifier.fillMaxWidth()) { Text("Preview JARVIS voice") }
 
+            Section("Hey JARVIS (wake word)")
+            Text(
+                "Say \"Hey Jarvis\" from any app and the assistant panel slides up over it, like Google Assistant. " +
+                    "Detection runs on your phone. It needs a free Picovoice AccessKey from console.picovoice.ai.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            var showPv by remember { mutableStateOf(false) }
+            OutlinedTextField(
+                d.picovoiceKey, { d = d.copy(picovoiceKey = it) }, Modifier.fillMaxWidth(),
+                label = { Text("Picovoice AccessKey") }, singleLine = true,
+                visualTransformation = if (showPv) androidx.compose.ui.text.input.VisualTransformation.None else androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                trailingIcon = { TextButton({ showPv = !showPv }) { Text(if (showPv) "Hide" else "Show") } },
+            )
+            SwitchRow("Listen for \"Jarvis\"", "Keeps a small notification while listening. Uses the microphone, so the first start must happen with the app open.", d.hotword) { d = d.copy(hotword = it) }
+            PermRow(
+                "Display over other apps", if (overlayOn) "Allowed" else "Required so the panel can appear over other apps",
+                if (overlayOn) null else "Allow",
+            ) { ctx.startActivity(Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION, android.net.Uri.parse("package:" + ctx.packageName)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+            PermRow(
+                "Battery optimisation", "Set JARVIS to \"Unrestricted\" / not optimised, or the system may stop the listener.",
+                "Open",
+            ) { ctx.startActivity(Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+            if (HotwordService.lastError != null) Text("Last wake-word error: " + HotwordService.lastError, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+
             Section("Language")
-            Text("Speech recognition language", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("Speech recognition language (JARVIS always replies in English)", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             LANGS.forEach { (tag, label) ->
                 Row(Modifier.fillMaxWidth().clickable { d = d.copy(language = tag) }, verticalAlignment = Alignment.CenterVertically) {
                     RadioButton(d.language == tag, { d = d.copy(language = tag) })
