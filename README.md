@@ -31,6 +31,11 @@ and `#threshold` per phrase if it triggers too easily or misses you). The model 
 "Jarvis", so expect to tune the thresholds on a real device.
 Android 14+ only lets a microphone service start while the app is open, so open JARVIS once after a reboot.
 
+**Panel behaviour:** the panel is its own session (your main chat is restored when it closes), stays open after each
+answer and listens again by itself (it retries a few times on silence; mute with the mic-off button, close with X). It
+steps aside only while an agent task has to tap the screen, then comes back with the result. The core animation follows
+the real state (listening level, thinking, speaking, error).
+
 ## Agent mode (the lightning button)
 The bolt forces every message to be treated as an agent task (otherwise JARVIS decides automatically). Tell JARVIS what to do ("open WhatsApp and message Sara hello"). It reads the screen through the
 Android **Accessibility Service**, then taps, types, scrolls and opens apps step by step (max 20 steps).

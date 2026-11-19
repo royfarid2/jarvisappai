@@ -16,6 +16,7 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -51,7 +52,14 @@ fun AssistPanel(vm: MainViewModel, onClose: () -> Unit) {
 
     val lastUser = msgs.lastOrNull { it.role == "user" }
     val lastReply = streaming ?: msgs.lastOrNull { it.id > (lastUser?.id ?: Long.MAX_VALUE) && it.role != "user" }?.content
-    val active = listening || speaking || busy
+    val muted by vm.assistMuted.collectAsState()
+    val state = when {
+        toast != null -> CoreState.ERROR
+        listening -> CoreState.LISTENING
+        speaking -> CoreState.SPEAKING
+        busy -> CoreState.THINKING
+        else -> CoreState.IDLE
+    }
 
     Box(
         Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.45f))
@@ -66,19 +74,22 @@ fun AssistPanel(vm: MainViewModel, onClose: () -> Unit) {
         ) {
             Column(Modifier.padding(horizontal = 20.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    JarvisLogo(logoSize = 40.dp, active = active)
-                    Spacer(Modifier.width(12.dp))
                     Text(
                         when {
+                            toast != null -> "Something went wrong"
+                            muted -> "Microphone muted"
                             listening -> "Listening…"
+                            speaking -> "Speaking…"
                             busy && streaming.isNullOrEmpty() -> "Thinking…"
-                            lastUser == null -> "At your service. How can I help?"
-                            else -> "J.A.R.V.I.S."
+                            lastUser == null -> "At your service."
+                            else -> "Ready"
                         },
                         style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f),
                     )
                     IconButton(onClose) { Icon(Icons.Filled.Close, "Close", tint = MaterialTheme.colorScheme.onSurfaceVariant) }
                 }
+
+                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { JarvisCore(state, level) }
 
                 if (lastUser != null) {
                     Text(lastUser.content, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -101,11 +112,8 @@ fun AssistPanel(vm: MainViewModel, onClose: () -> Unit) {
                 }
 
                 if (listening) {
-                    Waveform(level.coerceAtLeast(0.15f))
                     if (partial.isNotEmpty()) Text(partial, Modifier.fillMaxWidth(), textAlign = TextAlign.Center,
                         style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                } else if (speaking) {
-                    Waveform(0.55f, color = ArcBlue)
                 }
                 toast?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
 
@@ -128,6 +136,7 @@ fun AssistPanel(vm: MainViewModel, onClose: () -> Unit) {
                 } else {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
                         IconButton({ typing = true }) { Icon(Icons.Filled.Keyboard, "Type", tint = MaterialTheme.colorScheme.onSurfaceVariant) }
+                        IconButton({ vm.toggleAssistMute() }) { Icon(if (muted) Icons.Filled.MicOff else Icons.Filled.Mic, if (muted) "Unmute microphone" else "Mute microphone", tint = if (muted) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant) }
                         FilledIconButton(
                             { vm.toggleMic() }, Modifier.size(64.dp),
                             colors = IconButtonDefaults.filledIconButtonColors(

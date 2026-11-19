@@ -28,7 +28,7 @@ class AssistActivity : ComponentActivity() {
         vm = (application as JarvisApp).core()
         HotwordService.pause()                       // free the microphone for speech recognition
         setContent {
-            JarvisTheme(dark = true) { AssistPanel(vm, onClose = { finish() }) }
+            JarvisTheme(dark = true) { AssistPanel(vm, onClose = { finishAndRemoveTask() }) }
         }
         handle(intent)
     }

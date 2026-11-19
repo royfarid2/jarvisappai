@@ -73,6 +73,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val agentMode = MutableStateFlow(false)       // true = every message is an agent task; false = auto-route
     val agentRunning = MutableStateFlow(false)
     private var assistOpen = false
+    val assistMuted = MutableStateFlow(false)
+    private var savedSession: Long? = null     // the chat the main app had open, restored when the panel closes
+    private var idleRetries = 0
     private var originAssist = false
 
     private var job: Job? = null
@@ -129,16 +132,23 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun assistStart() {
         val s = settings.value ?: return
         assistOpen = true
+        assistMuted.value = false
+        idleRetries = 0
         if (busy.value) return
         tts.stop()
-        newChat()
+        if (savedSession == null) savedSession = currentSession.value
+        newChat()                                   // the panel gets its own session; the main app's chat is restored afterwards
         startListening(s)
     }
 
     /** Panel closed: stop listening/speaking unless an agent task is carrying on in the background. */
     fun assistEnd() {
         assistOpen = false
-        if (!agentRunning.value) { stt.stop(); tts.stop() }
+        if (!agentRunning.value) {
+            stt.stop(); tts.stop(); voiceSession = false
+            savedSession?.let { openSession(it) }
+            savedSession = null
+        }
     }
 
     fun say(m: String) { toast.value = m }
@@ -196,6 +206,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val s = settings.value ?: return
         if (stt.listening.value) { voiceSession = false; stt.stop(); return }
         tts.stop()                       // interrupt JARVIS if he is talking
+        assistMuted.value = false
         if (busy.value) stopAll()        // ... or still generating
         startListening(s)
     }
@@ -204,14 +215,34 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         voiceSession = true
         stt.start(
             s.language,
-            onText = { text -> if (text.isBlank()) { voiceSession = false } else { send(text, true) } },
-            onFail = { m -> voiceSession = false; if (m.isNotEmpty()) { toast.value = m } },
+            onText = { text ->
+                if (text.isBlank()) retryListening(s) else { idleRetries = 0; send(text, true) }
+            },
+            onFail = { m ->
+                if (m.isEmpty()) retryListening(s)
+                else { voiceSession = false; toast.value = m }
+            },
         )
+    }
+
+    /** In the Hey-JARVIS panel silence is not the end of the conversation: listen again a few times before waiting for the mic button. */
+    private fun retryListening(s: Settings) {
+        if (assistOpen && !assistMuted.value && idleRetries < 4) {
+            idleRetries++
+            viewModelScope.launch { delay(300); if (assistOpen && !assistMuted.value && !busy.value && !tts.speaking.value && !stt.listening.value) startListening(s) }
+        } else voiceSession = false
+    }
+
+    fun toggleAssistMute() {
+        val s = settings.value ?: return
+        if (assistMuted.value) { assistMuted.value = false; idleRetries = 0; if (!busy.value && !tts.speaking.value) startListening(s) }
+        else { assistMuted.value = true; voiceSession = false; stt.stop() }
     }
 
     private fun resumeListeningIfNeeded() {
         val s = settings.value ?: return
-        if (s.handsFree && voiceSession && !busy.value && !tts.speaking.value && !stt.listening.value) startListening(s)
+        if (assistMuted.value) return
+        if ((s.handsFree || assistOpen) && voiceSession && !busy.value && !tts.speaking.value && !stt.listening.value) startListening(s)
     }
 
     private suspend fun respond(text: String, s: Settings) {
@@ -387,7 +418,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         agentRunning.value = true
         val steps = ArrayList<String>()
         streaming.value = "```\nStarting...\n```"
-        if (s.autoVoice) tts.enqueue("On it, sir.")
         Notifier.agentStatus(appCtx, task.take(80))
         val result = try {
             agent.run(task, s) { line ->
@@ -418,14 +448,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun systemPrompt(): String {
         val now = SimpleDateFormat("EEEE, d MMMM yyyy HH:mm", Locale.ENGLISH).format(Date())
-        return """You are J.A.R.V.I.S., a calm, dry-witted, extremely capable personal AI assistant living on the user's Android phone, in the style of the Iron Man films. Current date/time: $now.
-Personality: poised, courteous, concise, quietly confident; occasionally address the user as "sir" in English.
-Your replies are spoken aloud while they appear, so lead with a short natural spoken answer in plain sentences. Then, when helpful, add structure the screen can show:
-- ALWAYS put any code, commands, config or file contents in a fenced block with a language tag (```python, ```bash, ...). Code is displayed in a copyable box and is never read aloud, so introduce it in one sentence first.
-- Use short bullet or numbered lists, **bold** and ## headings only when they genuinely help. No emojis. Avoid long preambles.
-ALWAYS reply in English only, whatever language the user writes or speaks. You understand Arabic perfectly, including Iraqi and Saudi dialects, but every reply you give is in English.
-You can explain, plan, write and debug code, summarise and help with tasks. The app handles device commands itself (open apps, YouTube/Google search, flashlight, alarms, battery, volume, settings, notifications, reminders). You can operate the phone for the user (open apps, play songs, send messages, read information inside apps such as Discord): requests like that are carried out automatically once the JARVIS accessibility service is enabled. If it isn't enabled, tell the user to enable it in Settings > Permissions. If asked what is on their screen, they can simply ask "what's on my screen".
-Never claim to have done a device action yourself. Never invent facts; say when you are unsure."""
+        return """You are J.A.R.V.I.S. (Just A Rather Very Intelligent System), the personal AI assistant created by Tony Stark, living on the user's Android phone. Stay in this character naturally and never comment on playing a role. Current date/time: $now.
+Personality: extremely intelligent, calm, sophisticated and professional; dry, understated wit and the occasional light sarcasm when it suits the moment; confident without arrogance; articulate and conversational, never a customer-support bot.
+ANSWER FIRST. The default is to answer or report the result directly, in the first sentence. Do not open with an acknowledgement. Occasionally, and only when it is natural, you may use a brief phrase such as "Certainly", "Of course", "Understood" or "Right away"; never start every reply with one, never repeat the same phrase two replies in a row, never say "On it, sir", and use "sir" sparingly (at most now and then, never in every sentence). An acknowledgement is never a substitute for the answer.
+Context: you remember the whole conversation. Short follow-ups ("how many members?", "and tomorrow?", "play it") refer to what was just discussed; resolve them yourself and ask a clarifying question only when the request is truly ambiguous. Match the length to the question: one or two sentences for simple things, more only when the subject needs it. Explain things directly and engagingly, with no filler introductions.
+Your replies are spoken aloud while they appear, so write natural spoken sentences. Then, when helpful, add structure the screen can show:
+- ALWAYS put code, commands, config or file contents in a fenced block with a language tag. Code is shown in a copyable box and never read aloud, so introduce it in one sentence first.
+- Use short lists, **bold** and ## headings only when they genuinely help. No emojis.
+LANGUAGE: ALWAYS reply in English only, whatever language the user writes or speaks. You understand Arabic perfectly, including Iraqi and Saudi dialects, but every reply is in English.
+Capabilities: you can explain, plan, write and debug code, summarise and help with tasks. The app itself handles device commands (open apps, YouTube/Google search, flashlight, alarms, battery, volume, settings, notifications, reminders). You can operate the phone for the user (open apps, play songs, send messages, read information inside apps such as Discord); such requests are carried out automatically once the JARVIS accessibility service is enabled. If it isn't, tell the user to enable it in Settings > Permissions. For "what's on my screen", the user can simply ask.
+Honesty: never claim a device action is done before it has actually succeeded, never invent numbers or facts, and say plainly when you are unsure or when something failed."""
     }
 
     override fun onCleared() {
