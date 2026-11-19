@@ -15,3 +15,4 @@ app/build/
 .env
 *.env
 secrets.properties
+app/libs/*.aar

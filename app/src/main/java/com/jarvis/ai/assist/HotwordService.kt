@@ -15,19 +15,16 @@ import android.os.IBinder
 import android.os.Looper
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
-import ai.picovoice.porcupine.Porcupine
-import ai.picovoice.porcupine.PorcupineManager
-import ai.picovoice.porcupine.PorcupineManagerCallback
+import com.jarvis.ai.wakeword.SherpaWakeWord
 import com.jarvis.ai.JarvisApp
 import com.jarvis.ai.R
-import com.jarvis.ai.data.SecureStore
 
 /**
- * Always-on "Jarvis" wake-word listener (Picovoice Porcupine, runs fully on-device).
+ * Always-on "Jarvis" wake-word listener (Sherpa-ONNX keyword spotter, fully on-device, no account or key).
  * When it hears "Jarvis" it releases the microphone and shows the assistant panel over whatever app is open.
  */
 class HotwordService : Service() {
-    private var manager: PorcupineManager? = null
+    private var detector: SherpaWakeWord? = null
     private val main = Handler(Looper.getMainLooper())
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -65,21 +62,13 @@ class HotwordService : Service() {
     }
 
     private fun startDetection() {
-        if (manager != null) return
-        val key = SecureStore(this).picovoiceKey
-        if (key.isBlank()) { stopSelf(); return }
-        try {
-            manager = PorcupineManager.Builder()
-                .setAccessKey(key)
-                .setKeyword(Porcupine.BuiltInKeyword.JARVIS)
-                .setSensitivity(0.7f)
-                .build(applicationContext, PorcupineManagerCallback { main.post { onWake() } })
-            manager?.start()
-        } catch (e: Exception) {
-            manager = null
-            lastError = e.message ?: e.javaClass.simpleName
-            stopSelf()
-        }
+        if (detector != null) return
+        val d = SherpaWakeWord(applicationContext, { main.post { onWake() } }, { msg -> lastError = msg })
+        detector = d
+        Thread {
+            try { d.load(); lastError = null; d.start() }
+            catch (e: Throwable) { lastError = e.message ?: e.javaClass.simpleName; main.post { stopSelf() } }
+        }.start()
     }
 
     private fun onWake() {
@@ -88,12 +77,12 @@ class HotwordService : Service() {
         AssistLauncher.show(applicationContext)
     }
 
-    fun pauseDetection() { try { manager?.stop() } catch (e: Exception) { } }
-    fun resumeDetection() { try { manager?.start() } catch (e: Exception) { } }
+    fun pauseDetection() { try { detector?.stop() } catch (e: Exception) { } }
+    fun resumeDetection() { try { detector?.start() } catch (e: Exception) { } }
 
     override fun onDestroy() {
-        try { manager?.stop(); manager?.delete() } catch (e: Exception) { }
-        manager = null
+        try { detector?.release() } catch (e: Exception) { }
+        detector = null
         if (instance === this) instance = null
         super.onDestroy()
     }

@@ -20,7 +20,7 @@ class MainActivity : ComponentActivity() {
         // keep the wake-word listener alive across app restarts (a microphone service may only start while the app is visible)
         lifecycleScope.launch {
             val s = vm.settings.filterNotNull().first()
-            if (s.hotword && s.picovoiceKey.isNotBlank()) HotwordService.start(this@MainActivity)
+            if (s.hotword) HotwordService.start(this@MainActivity)
         }
     }
 

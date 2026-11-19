@@ -23,10 +23,12 @@ OpenAI-compatible AI, hear replies in a British male voice, and control parts of
   bold and quotes are formatted. Long-press text to select.
 
 ## Hey JARVIS (wake word + assistant panel)
-Turn on *Listen for "Jarvis"* in Settings, paste a free Picovoice AccessKey, allow *Display over other apps* and set battery
-to unrestricted. Say "Hey Jarvis" from any app: a bottom panel (like Google Assistant) opens and listens. Requests that
-need the phone ("play this on Spotify", "message Sara on WhatsApp", "how many members are in my Discord server Denial")
-are routed to the agent automatically; the panel steps aside while it works and reports back by voice.
+Offline wake word using **Sherpa-ONNX keyword spotting** (3.3M-parameter streaming model, int8, bundled in
+`assets/kws/`; no account, no API key, no audio leaves the phone). Turn on *Listen for "Jarvis"* in Settings, allow
+*Display over other apps* and set battery to unrestricted. Say "Hey Jarvis" from any app: a bottom panel opens and
+listens. Phrases live in `assets/kws/keywords.txt` (BPE tokens made with `sherpa-onnx-cli text2token`; tune `:boost`
+and `#threshold` per phrase if it triggers too easily or misses you). The model is generic English, not trained on
+"Jarvis", so expect to tune the thresholds on a real device.
 Android 14+ only lets a microphone service start while the app is open, so open JARVIS once after a reboot.
 
 ## Agent mode (the lightning button)
@@ -48,8 +50,8 @@ Add a command: create a class extending `RegexAction` in `actions/Actions.kt` an
 ## Honest limitations
 - **Voice:** no Marvel audio is bundled. The JARVIS voice is a community voice model hosted by Fish Audio and generated
   with your own Fish API key (credits/limits apply). Without a key, the app uses your phone's British male voice.
-- **Wake word:** always-on "Hey JARVIS" is not implemented (battery/privacy limits, needs a dedicated engine).
-  Use the mic button and Hands-free mode instead.
+- **Wake word:** implemented with Sherpa-ONNX but not yet tested on a device by the author of this change; accuracy and
+  battery use need real-world checking.
 - **Android restrictions:** other apps' notifications are only readable after you enable Notification Access;
   Android cannot set the volume above hardware limits or silently start activities from the background;
   reminders use inexact alarms (can drift by a minute or so in Doze). The Accessibility Service is only used in Agent mode / screen questions.
@@ -57,6 +59,7 @@ Add a command: create a class extending `RegexAction` in `actions/Actions.kt` an
 - The font is the system serif/sans pairing (a Claude-like feel); no proprietary fonts are bundled.
 
 ## Build
+The wake-word library is not on Maven Central: run `bash scripts/fetch_sherpa.sh` once locally (CI does it itself).
 GitHub: push to `main`, open **Actions -> Android CI -> Artifacts -> jarvis-ai-debug-apk**.
 Locally: open in Android Studio (JDK 17) and run, or `gradle assembleDebug` (Gradle 8.7+).
 APK: `app/build/outputs/apk/debug/app-debug.apk`. Unit tests: `gradle testDebugUnitTest`.

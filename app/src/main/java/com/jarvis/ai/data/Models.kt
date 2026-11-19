@@ -21,7 +21,6 @@ data class Settings(
     val visionModel: String = "qwen/qwen3.8-27b",
     val agentVision: Boolean = true,     // let JARVIS send screenshots to the AI when text alone is not enough
     val hotword: Boolean = false,        // always-listening "Jarvis" wake word
-    val picovoiceKey: String = "",       // Picovoice AccessKey (free) for the wake word engine
     val onboarded: Boolean = false,
 )
 

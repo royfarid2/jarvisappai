@@ -93,7 +93,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             repo.save(s)
             tts.settings = s
             settings.value = s
-            if (s.hotword && s.picovoiceKey.isNotBlank()) HotwordService.start(appCtx) else HotwordService.stop(appCtx)
+            if (s.hotword) HotwordService.start(appCtx) else HotwordService.stop(appCtx)
         }
     }
 

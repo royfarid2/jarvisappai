@@ -24,6 +24,9 @@ jobs:
         with:
           gradle-version: "8.7"
 
+      - name: Fetch Sherpa-ONNX wake-word library
+        run: bash scripts/fetch_sherpa.sh
+
       - name: Run unit tests
         run: gradle testDebugUnitTest --stacktrace
 

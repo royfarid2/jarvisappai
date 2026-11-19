@@ -46,7 +46,8 @@ dependencies {
     implementation("androidx.datastore:datastore-preferences:1.1.1")
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
-    implementation("ai.picovoice:porcupine-android:latest.release")
+    // Offline wake word (Sherpa-ONNX). The AAR is not on Maven Central: run scripts/fetch_sherpa.sh (CI does it automatically).
+    implementation(files("libs/sherpa-onnx-2.0.2.aar"))
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
 
     testImplementation("junit:junit:4.13.2")

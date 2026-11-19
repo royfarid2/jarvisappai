@@ -29,10 +29,6 @@ class SecureStore(private val ctx: Context) {
         get() = prefs.getString("api_key", "") ?: ""
         set(v) { prefs.edit().putString("api_key", v).apply() }
 
-    var picovoiceKey: String
-        get() = prefs.getString("picovoice_key", "") ?: ""
-        set(v) { prefs.edit().putString("picovoice_key", v).apply() }
-
     var fishKey: String
         get() = prefs.getString("fish_key", "") ?: ""
         set(v) { prefs.edit().putString("fish_key", v).apply() }
@@ -64,7 +60,6 @@ class SettingsRepo(private val ctx: Context) {
             visionModel = p[VISION_MODEL] ?: d.visionModel,
             agentVision = p[AGENT_VISION] ?: d.agentVision,
             hotword = p[HOTWORD] ?: d.hotword,
-            picovoiceKey = secure.picovoiceKey,
             onboarded = p[ONBOARDED] ?: d.onboarded,
         )
     }
@@ -72,7 +67,6 @@ class SettingsRepo(private val ctx: Context) {
     suspend fun save(s: Settings) = withContext(Dispatchers.IO) {
         secure.apiKey = s.apiKey.trim()
         secure.fishKey = s.fishKey.trim()
-        secure.picovoiceKey = s.picovoiceKey.trim()
         ctx.dataStore.edit { p ->
             p[ENDPOINT] = s.endpoint.trim(); p[MODEL] = s.model.trim(); p[VOICE] = s.voiceName
             p[RATE] = s.rate; p[PITCH] = s.pitch; p[LANG] = s.language; p[DARK] = s.dark

@@ -109,15 +109,8 @@ fun SettingsScreen(vm: MainViewModel, current: Settings, onBack: () -> Unit) {
             Section("Hey JARVIS (wake word)")
             Text(
                 "Say \"Hey Jarvis\" from any app and the assistant panel slides up over it, like Google Assistant. " +
-                    "Detection runs on your phone. It needs a free Picovoice AccessKey from console.picovoice.ai.",
+                    "Detection is offline (Sherpa-ONNX) and runs on your phone; no account or key needed, and no audio is sent anywhere.",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            var showPv by remember { mutableStateOf(false) }
-            OutlinedTextField(
-                d.picovoiceKey, { d = d.copy(picovoiceKey = it) }, Modifier.fillMaxWidth(),
-                label = { Text("Picovoice AccessKey") }, singleLine = true,
-                visualTransformation = if (showPv) androidx.compose.ui.text.input.VisualTransformation.None else androidx.compose.ui.text.input.PasswordVisualTransformation(),
-                trailingIcon = { TextButton({ showPv = !showPv }) { Text(if (showPv) "Hide" else "Show") } },
             )
             SwitchRow("Listen for \"Jarvis\"", "Keeps a small notification while listening. Uses the microphone, so the first start must happen with the app open.", d.hotword) { d = d.copy(hotword = it) }
             PermRow(
