@@ -29,6 +29,8 @@ data class SessionEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val title: String,
     val updatedAt: Long = System.currentTimeMillis(),
+    @ColumnInfo(defaultValue = "0") val pinned: Boolean = false,
+    @ColumnInfo(defaultValue = "0") val archived: Boolean = false,
 )
 
 @Entity(tableName = "messages", indices = [Index("sessionId")])
@@ -42,7 +44,7 @@ data class MessageEntity(
 
 @Dao
 interface MessageDao {
-    @Query("SELECT * FROM sessions ORDER BY updatedAt DESC") fun sessions(): Flow<List<SessionEntity>>
+    @Query("SELECT * FROM sessions ORDER BY pinned DESC, updatedAt DESC") fun sessions(): Flow<List<SessionEntity>>
     @Query("SELECT * FROM messages WHERE sessionId = :sid ORDER BY id") fun observe(sid: Long): Flow<List<MessageEntity>>
     @Query("SELECT * FROM messages WHERE sessionId = :sid AND role IN ('user','assistant') ORDER BY id DESC LIMIT :n")
     suspend fun last(sid: Long, n: Int): List<MessageEntity>
@@ -50,6 +52,9 @@ interface MessageDao {
     @Insert suspend fun insert(m: MessageEntity): Long
     @Insert suspend fun insertSession(s: SessionEntity): Long
     @Query("UPDATE sessions SET title = :t WHERE id = :id") suspend fun rename(id: Long, t: String)
+    @Query("UPDATE sessions SET pinned = :v WHERE id = :id") suspend fun setPinned(id: Long, v: Boolean)
+    @Query("UPDATE sessions SET archived = :v WHERE id = :id") suspend fun setArchived(id: Long, v: Boolean)
+    @Query("SELECT DISTINCT sessionId FROM messages WHERE role IN ('user','assistant') AND content LIKE '%' || :q || '%'") suspend fun searchSessions(q: String): List<Long>
     @Query("UPDATE sessions SET updatedAt = :ts WHERE id = :id") suspend fun touch(id: Long, ts: Long)
     @Query("DELETE FROM messages WHERE sessionId = :sid") suspend fun deleteMessages(sid: Long)
     @Query("DELETE FROM sessions WHERE id = :id") suspend fun deleteSession(id: Long)
@@ -57,5 +62,13 @@ interface MessageDao {
     @Query("DELETE FROM sessions") suspend fun clearSessions()
 }
 
-@Database(entities = [MessageEntity::class, SessionEntity::class], version = 2, exportSchema = false)
+@Database(entities = [MessageEntity::class, SessionEntity::class], version = 3, exportSchema = false)
 abstract class AppDb : RoomDatabase() { abstract fun dao(): MessageDao }
+
+/** Keeps every existing chat: only adds the pin / archive flags. */
+val MIGRATION_2_3 = object : androidx.room.migration.Migration(2, 3) {
+    override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE sessions ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE sessions ADD COLUMN archived INTEGER NOT NULL DEFAULT 0")
+    }
+}

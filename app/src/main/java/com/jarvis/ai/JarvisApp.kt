@@ -16,7 +16,7 @@ class JarvisApp : Application(), ViewModelStoreOwner {
     fun core(): MainViewModel =
         ViewModelProvider(this, ViewModelProvider.AndroidViewModelFactory.getInstance(this))[MainViewModel::class.java]
 
-    val db: AppDb by lazy { Room.databaseBuilder(applicationContext, AppDb::class.java, "jarvis.db").fallbackToDestructiveMigration().build() }
+    val db: AppDb by lazy { Room.databaseBuilder(applicationContext, AppDb::class.java, "jarvis.db").addMigrations(com.jarvis.ai.data.MIGRATION_2_3).fallbackToDestructiveMigration().build() }
 
     override fun onCreate() {
         super.onCreate()

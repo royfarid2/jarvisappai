@@ -141,9 +141,31 @@ fun ChatScreen(vm: MainViewModel, s: Settings, openSettings: () -> Unit) {
                     { vm.newChat(); scope.launch { drawer.close() } },
                     Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                 ) { Icon(Icons.Filled.Add, null); Spacer(Modifier.width(8.dp)); Text("New chat") }
-                Spacer(Modifier.height(12.dp))
+                Spacer(Modifier.height(8.dp))
+                var query by remember { mutableStateOf("") }
+                var showArchived by remember { mutableStateOf(false) }
+                var hits by remember { mutableStateOf<Set<Long>?>(null) }
+                LaunchedEffect(query) { hits = if (query.isBlank()) null else vm.searchSessionIds(query.trim()).toSet() }
+                OutlinedTextField(
+                    query, { query = it }, Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                    placeholder = { Text("Search chats") }, singleLine = true,
+                    leadingIcon = { Icon(Icons.Filled.Search, null) },
+                )
+                val shown = sessions.filter { se ->
+                    se.archived == showArchived && (query.isBlank() || se.title.contains(query, true) || hits?.contains(se.id) == true)
+                }
+                val archivedCount = sessions.count { it.archived }
+                if (archivedCount > 0 || showArchived) {
+                    TextButton({ showArchived = !showArchived }, Modifier.padding(horizontal = 8.dp)) {
+                        Text(if (showArchived) "Back to chats" else "Archived ($archivedCount)")
+                    }
+                }
                 LazyColumn(Modifier.weight(1f)) {
-                    items(sessions, key = { it.id }) { se ->
+                    if (shown.isEmpty()) item {
+                        Text(if (query.isNotBlank()) "No chats match." else if (showArchived) "No archived chats." else "No chats yet.",
+                            Modifier.padding(16.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    items(shown, key = { it.id }) { se ->
                         var menu by remember { mutableStateOf(false) }
                         Row(
                             Modifier.fillMaxWidth().padding(horizontal = 8.dp)
@@ -152,10 +174,13 @@ fun ChatScreen(vm: MainViewModel, s: Settings, openSettings: () -> Unit) {
                                 .padding(start = 14.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
+                            if (se.pinned) { Icon(Icons.Filled.PushPin, "Pinned", Modifier.size(16.dp), tint = Cyan); Spacer(Modifier.width(6.dp)) }
                             Text(se.title, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium)
                             Box {
                                 IconButton({ menu = true }) { Icon(Icons.Filled.MoreVert, "Options", tint = MaterialTheme.colorScheme.onSurfaceVariant) }
                                 DropdownMenu(menu, { menu = false }) {
+                                    DropdownMenuItem({ Text(if (se.pinned) "Unpin" else "Pin") }, { menu = false; vm.pinSession(se.id, !se.pinned) })
+                                    DropdownMenuItem({ Text(if (se.archived) "Unarchive" else "Archive") }, { menu = false; vm.archiveSession(se.id, !se.archived) })
                                     DropdownMenuItem({ Text("Rename") }, { menu = false; renaming = se.id to se.title })
                                     DropdownMenuItem({ Text("Delete") }, { menu = false; vm.deleteSession(se.id) })
                                 }

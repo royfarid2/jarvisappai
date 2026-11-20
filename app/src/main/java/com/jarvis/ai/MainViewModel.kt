@@ -162,6 +162,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
     fun newChat() = openSession(-1L)
     fun renameSession(id: Long, title: String) { viewModelScope.launch { if (title.isNotBlank()) dao.rename(id, title.trim().take(60)) } }
+    fun pinSession(id: Long, pinned: Boolean) { viewModelScope.launch { dao.setPinned(id, pinned) } }
+    fun archiveSession(id: Long, archived: Boolean) {
+        viewModelScope.launch { dao.setArchived(id, archived) }
+        if (archived && currentSession.value == id) newChat()
+    }
+    suspend fun searchSessionIds(q: String): List<Long> = dao.searchSessions(q)
     fun deleteSession(id: Long) {
         viewModelScope.launch {
             dao.deleteMessages(id); dao.deleteSession(id)
