@@ -53,10 +53,11 @@ fun AssistPanel(vm: MainViewModel, onClose: () -> Unit) {
     val lastUser = msgs.lastOrNull { it.role == "user" }
     val lastReply = streaming ?: msgs.lastOrNull { it.id > (lastUser?.id ?: Long.MAX_VALUE) && it.role != "user" }?.content
     val muted by vm.assistMuted.collectAsState()
+    val intro by vm.introPlaying.collectAsState()
     val state = when {
         toast != null -> CoreState.ERROR
         listening -> CoreState.LISTENING
-        speaking -> CoreState.SPEAKING
+        speaking || intro -> CoreState.SPEAKING
         busy -> CoreState.THINKING
         else -> CoreState.IDLE
     }
@@ -79,7 +80,7 @@ fun AssistPanel(vm: MainViewModel, onClose: () -> Unit) {
                             toast != null -> "Something went wrong"
                             muted -> "Microphone muted"
                             listening -> "Listening…"
-                            speaking -> "Speaking…"
+                            speaking || intro -> "Speaking…"
                             busy && streaming.isNullOrEmpty() -> "Thinking…"
                             lastUser == null -> "At your service."
                             else -> "Ready"

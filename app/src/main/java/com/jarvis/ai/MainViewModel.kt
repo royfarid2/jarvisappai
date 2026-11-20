@@ -129,7 +129,35 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Hey-JARVIS panel opened: fresh chat, start listening at once. */
-    fun assistStart() {
+    // ----- wake-word intro sound (res/raw/jarvis_intro.mp3) -----
+    val introPlaying = MutableStateFlow(false)
+    private var introPlayer: android.media.MediaPlayer? = null
+
+    private fun stopIntro() {
+        introPlayer?.let { try { it.stop() } catch (e: Exception) { }; it.release() }
+        introPlayer = null
+        introPlaying.value = false
+    }
+
+    /** Plays the intro, then starts listening. Tapping the mic skips it. Falls back to listening at once if it cannot play. */
+    private fun playIntroThenListen(s: Settings) {
+        stopIntro()
+        val mp = try { android.media.MediaPlayer.create(appCtx, R.raw.jarvis_intro) } catch (e: Exception) { null }
+        if (mp == null) { startListening(s); return }
+        mp.setAudioAttributes(android.media.AudioAttributes.Builder()
+            .setUsage(android.media.AudioAttributes.USAGE_ASSISTANT)
+            .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH).build())
+        mp.setOnCompletionListener {
+            stopIntro()
+            if (assistOpen && !assistMuted.value && !busy.value) startListening(s)
+        }
+        mp.setOnErrorListener { _, _, _ -> stopIntro(); if (assistOpen) startListening(s); true }
+        introPlayer = mp
+        introPlaying.value = true
+        mp.start()
+    }
+
+    fun assistStart(fromWake: Boolean = false) {
         val s = settings.value ?: return
         assistOpen = true
         assistMuted.value = false
@@ -138,12 +166,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         tts.stop()
         if (savedSession == null) savedSession = currentSession.value
         newChat()                                   // the panel gets its own session; the main app's chat is restored afterwards
-        startListening(s)
+        if (fromWake) playIntroThenListen(s) else startListening(s)
     }
 
     /** Panel closed: stop listening/speaking unless an agent task is carrying on in the background. */
     fun assistEnd() {
         assistOpen = false
+        stopIntro()
         if (!agentRunning.value) {
             stt.stop(); tts.stop(); voiceSession = false
             savedSession?.let { openSession(it) }
@@ -210,6 +239,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun toggleMic() {
         val s = settings.value ?: return
+        if (introPlaying.value) { stopIntro(); assistMuted.value = false; startListening(s); return }   // skip the intro
         if (stt.listening.value) { voiceSession = false; stt.stop(); return }
         tts.stop()                       // interrupt JARVIS if he is talking
         assistMuted.value = false

@@ -73,8 +73,7 @@ class HotwordService : Service() {
 
     private fun onWake() {
         pauseDetection()
-        try { ToneGenerator(AudioManager.STREAM_NOTIFICATION, 70).startTone(ToneGenerator.TONE_PROP_ACK, 120) } catch (e: Exception) { }
-        AssistLauncher.show(applicationContext)
+        AssistLauncher.show(applicationContext, fromWake = true)
     }
 
     fun pauseDetection() { try { detector?.stop() } catch (e: Exception) { } }

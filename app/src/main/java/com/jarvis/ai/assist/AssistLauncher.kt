@@ -18,10 +18,11 @@ import com.jarvis.ai.R
 /** Shows the assistant panel over the current app (works from the background with "Display over other apps"). */
 object AssistLauncher {
     @SuppressLint("MissingPermission")
-    fun show(ctx: Context, resultOnly: Boolean = false) {
+    fun show(ctx: Context, resultOnly: Boolean = false, fromWake: Boolean = false) {
         val intent = Intent(ctx, AssistActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NO_ANIMATION)
             .putExtra(AssistActivity.EXTRA_RESULT_ONLY, resultOnly)
+            .putExtra(AssistActivity.EXTRA_FROM_WAKE, fromWake)
         var overlay: View? = null
         val wm = ctx.getSystemService(WindowManager::class.java)
         if (Settings.canDrawOverlays(ctx)) {

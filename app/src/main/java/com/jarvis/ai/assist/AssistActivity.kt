@@ -19,7 +19,7 @@ class AssistActivity : ComponentActivity() {
     private lateinit var vm: MainViewModel
 
     private val micPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
-        if (ok) vm.assistStart() else vm.say("Microphone permission denied. You can still type to me.")
+        if (ok) vm.assistStart(fromWake) else vm.say("Microphone permission denied. You can still type to me.")
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -37,7 +37,8 @@ class AssistActivity : ComponentActivity() {
 
     private fun handle(i: Intent) {
         if (i.getBooleanExtra(EXTRA_RESULT_ONLY, false)) return        // just showing the result of an agent task
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) vm.assistStart()
+        fromWake = i.getBooleanExtra(EXTRA_FROM_WAKE, false)
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) vm.assistStart(fromWake)
         else micPermission.launch(Manifest.permission.RECORD_AUDIO)
     }
 
@@ -50,5 +51,6 @@ class AssistActivity : ComponentActivity() {
         super.onDestroy()
     }
 
-    companion object { const val EXTRA_RESULT_ONLY = "result_only" }
+    private var fromWake = false
+    companion object { const val EXTRA_RESULT_ONLY = "result_only"; const val EXTRA_FROM_WAKE = "from_wake" }
 }
