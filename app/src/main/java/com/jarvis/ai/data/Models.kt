@@ -3,9 +3,6 @@ package com.jarvis.ai.data
 import androidx.room.*
 import kotlinx.coroutines.flow.Flow
 
-/** A backup AI provider (any OpenAI-compatible endpoint). The key is stored encrypted, never in DataStore. */
-data class Provider(val name: String, val endpoint: String, val apiKey: String, val model: String)
-
 data class Settings(
     val endpoint: String = "https://api.groq.com/openai/v1",
     val apiKey: String = "",
@@ -24,7 +21,6 @@ data class Settings(
     val visionModel: String = "qwen/qwen3.8-27b",
     val agentVision: Boolean = true,     // let JARVIS send screenshots to the AI when text alone is not enough
     val hotword: Boolean = false,        // always-listening "Jarvis" wake word
-    val fallbacks: List<Provider> = emptyList(),   // tried in order when the main provider fails or is out of quota
     val onboarded: Boolean = false,
 )
 

@@ -29,10 +29,6 @@ class SecureStore(private val ctx: Context) {
         get() = prefs.getString("api_key", "") ?: ""
         set(v) { prefs.edit().putString("api_key", v).apply() }
 
-    var providersJson: String
-        get() = prefs.getString("providers", "[]") ?: "[]"
-        set(v) { prefs.edit().putString("providers", v).apply() }
-
     var fishKey: String
         get() = prefs.getString("fish_key", "") ?: ""
         set(v) { prefs.edit().putString("fish_key", v).apply() }
@@ -64,7 +60,6 @@ class SettingsRepo(private val ctx: Context) {
             visionModel = p[VISION_MODEL] ?: d.visionModel,
             agentVision = p[AGENT_VISION] ?: d.agentVision,
             hotword = p[HOTWORD] ?: d.hotword,
-            fallbacks = parseProviders(secure.providersJson),
             onboarded = p[ONBOARDED] ?: d.onboarded,
         )
     }
@@ -72,7 +67,6 @@ class SettingsRepo(private val ctx: Context) {
     suspend fun save(s: Settings) = withContext(Dispatchers.IO) {
         secure.apiKey = s.apiKey.trim()
         secure.fishKey = s.fishKey.trim()
-        secure.providersJson = providersToJson(s.fallbacks)
         ctx.dataStore.edit { p ->
             p[ENDPOINT] = s.endpoint.trim(); p[MODEL] = s.model.trim(); p[VOICE] = s.voiceName
             p[RATE] = s.rate; p[PITCH] = s.pitch; p[LANG] = s.language; p[DARK] = s.dark
@@ -81,17 +75,6 @@ class SettingsRepo(private val ctx: Context) {
             p[VISION_MODEL] = s.visionModel.trim(); p[AGENT_VISION] = s.agentVision; p[HOTWORD] = s.hotword
             p[ONBOARDED] = s.onboarded
         }
-    }
-
-    private fun parseProviders(j: String): List<Provider> = try {
-        val a = org.json.JSONArray(j)
-        List(a.length()) { val o = a.getJSONObject(it); Provider(o.optString("name"), o.optString("endpoint"), o.optString("key"), o.optString("model")) }
-    } catch (e: Exception) { emptyList() }
-
-    private fun providersToJson(l: List<Provider>): String {
-        val a = org.json.JSONArray()
-        l.forEach { a.put(org.json.JSONObject().put("name", it.name).put("endpoint", it.endpoint).put("key", it.apiKey).put("model", it.model)) }
-        return a.toString()
     }
 
     private companion object {
