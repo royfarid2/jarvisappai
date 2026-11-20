@@ -4,9 +4,9 @@ import androidx.room.*
 import kotlinx.coroutines.flow.Flow
 
 data class Settings(
-    val endpoint: String = "https://api.groq.com/openai/v1",
+    val endpoint: String = FREELLM_ENDPOINT,     // FreeLLMAPI is the primary backend; any OpenAI-compatible URL still works
     val apiKey: String = "",
-    val model: String = "openai/gpt-oss-20b",
+    val model: String = "auto",                  // "auto" = FreeLLMAPI router picks and fails over between providers
     val voiceName: String = "",          // "" = auto (best British male voice)
     val rate: Float = 1.0f,
     val pitch: Float = 0.80f,
@@ -22,7 +22,18 @@ data class Settings(
     val agentVision: Boolean = true,     // let JARVIS send screenshots to the AI when text alone is not enough
     val hotword: Boolean = false,        // always-listening "Jarvis" wake word
     val onboarded: Boolean = false,
+    // --- voice loudness (software only; the phone's own volume keys still set the hardware ceiling) ---
+    val voiceVolume: Float = 1.0f,       // player volume, 0..1
+    val voiceBoostDb: Int = 0,           // extra gain through LoudnessEnhancer, 0..12 dB (can distort at the top end)
+    // --- wake greeting: spoken by the normal TTS voice, never a prerecorded file ---
+    val greeting: String = DEFAULT_GREETING,
+    val aiGreeting: Boolean = false,     // let the model write the greeting (falls back to the template if slow)
+    // --- FreeLLMAPI server supervision (Termux on the phone, or just monitoring a PC/Pi on the LAN) ---
+    val autoStartServer: Boolean = false,
 )
+
+const val DEFAULT_GREETING = "{greeting}, sir. Jarvis is online. How may I assist you?"
+const val FREELLM_ENDPOINT = "http://127.0.0.1:3001/v1"
 
 @Entity(tableName = "sessions")
 data class SessionEntity(

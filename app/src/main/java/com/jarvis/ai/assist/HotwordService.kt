@@ -43,7 +43,9 @@ class HotwordService : Service() {
 
     private fun showNotification() {
         val ask = PendingIntent.getActivity(
-            this, 10, Intent(this, AssistActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            // from_wake = true: tapping the notification runs the SAME activation as hearing "Jarvis" (spoken greeting included)
+            this, 10, Intent(this, AssistActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                .putExtra(AssistActivity.EXTRA_FROM_WAKE, true),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         val stop = PendingIntent.getService(
             this, 11, Intent(this, HotwordService::class.java).setAction(ACTION_STOP),
@@ -54,7 +56,7 @@ class HotwordService : Service() {
             .setContentText("Say \"Hey Jarvis\" from any app")
             .setOngoing(true).setSilent(true)
             .setContentIntent(ask)
-            .addAction(0, "Ask now", ask)
+            .addAction(0, "Wake JARVIS", ask)
             .addAction(0, "Turn off", stop)
             .build()
         if (Build.VERSION.SDK_INT >= 29) startForeground(NOTIF_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)

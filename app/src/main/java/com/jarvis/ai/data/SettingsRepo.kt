@@ -61,6 +61,11 @@ class SettingsRepo(private val ctx: Context) {
             agentVision = p[AGENT_VISION] ?: d.agentVision,
             hotword = p[HOTWORD] ?: d.hotword,
             onboarded = p[ONBOARDED] ?: d.onboarded,
+            voiceVolume = p[VOICE_VOL] ?: d.voiceVolume,
+            voiceBoostDb = p[VOICE_BOOST] ?: d.voiceBoostDb,
+            greeting = p[GREETING] ?: d.greeting,
+            aiGreeting = p[AI_GREETING] ?: d.aiGreeting,
+            autoStartServer = p[AUTO_SERVER] ?: d.autoStartServer,
         )
     }
 
@@ -74,6 +79,9 @@ class SettingsRepo(private val ctx: Context) {
             p[FISH_VOICE] = s.fishVoiceId.trim(); p[FISH_MODEL] = s.fishModel.trim()
             p[VISION_MODEL] = s.visionModel.trim(); p[AGENT_VISION] = s.agentVision; p[HOTWORD] = s.hotword
             p[ONBOARDED] = s.onboarded
+            p[VOICE_VOL] = s.voiceVolume.coerceIn(0f, 1f); p[VOICE_BOOST] = s.voiceBoostDb.coerceIn(0, 12)
+            p[GREETING] = s.greeting.ifBlank { DEFAULT_GREETING }; p[AI_GREETING] = s.aiGreeting
+            p[AUTO_SERVER] = s.autoStartServer
         }
     }
 
@@ -94,5 +102,10 @@ class SettingsRepo(private val ctx: Context) {
         val VISION_MODEL = stringPreferencesKey("vision_model")
         val AGENT_VISION = booleanPreferencesKey("agent_vision")
         val HOTWORD = booleanPreferencesKey("hotword")
+        val VOICE_VOL = floatPreferencesKey("voice_volume")
+        val VOICE_BOOST = intPreferencesKey("voice_boost_db")
+        val GREETING = stringPreferencesKey("greeting")
+        val AI_GREETING = booleanPreferencesKey("ai_greeting")
+        val AUTO_SERVER = booleanPreferencesKey("auto_server")
     }
 }

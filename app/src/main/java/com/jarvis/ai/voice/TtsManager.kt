@@ -3,6 +3,8 @@ package com.jarvis.ai.voice
 import android.content.Context
 import android.media.AudioAttributes
 import android.media.MediaPlayer
+import android.media.audiofx.LoudnessEnhancer
+import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.speech.tts.TextToSpeech
@@ -148,23 +150,34 @@ class TtsManager(
     private suspend fun play(f: File, onStart: ((Long) -> Unit)?) = suspendCancellableCoroutine<Unit> { cont ->
         val mp = MediaPlayer()
         player = mp
+        var boost: LoudnessEnhancer? = null
+        fun releaseBoost() { try { boost?.release() } catch (e: Exception) { }; boost = null }
+        val vol = settings.voiceVolume.coerceIn(0f, 1f)
+        val boostDb = settings.voiceBoostDb.coerceIn(0, 12)
         mp.setAudioAttributes(
             AudioAttributes.Builder()
                 .setUsage(AudioAttributes.USAGE_ASSISTANT)
                 .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build()
         )
         mp.setDataSource(f.absolutePath)
-        mp.setOnPreparedListener { m -> onStart?.invoke(m.duration.toLong()); m.start() }
+        mp.setVolume(vol, vol)
+        mp.setOnPreparedListener { m ->
+            // Software gain above the player's 1.0 ceiling. Effect is optional: some devices refuse it.
+            if (boostDb > 0) boost = try {
+                LoudnessEnhancer(m.audioSessionId).apply { setTargetGain(boostDb * 100); enabled = true }
+            } catch (e: Exception) { null }
+            onStart?.invoke(m.duration.toLong()); m.start()
+        }
         mp.setOnCompletionListener { m ->
-            m.release(); if (player === m) player = null
+            releaseBoost(); m.release(); if (player === m) player = null
             if (cont.isActive) cont.resume(Unit)
         }
         mp.setOnErrorListener { m, _, _ ->
-            m.release(); if (player === m) player = null
+            releaseBoost(); m.release(); if (player === m) player = null
             if (cont.isActive) cont.resume(Unit)
             true
         }
-        cont.invokeOnCancellation { try { mp.release() } catch (e: Exception) { } }
+        cont.invokeOnCancellation { releaseBoost(); try { mp.release() } catch (e: Exception) { } }
         mp.prepareAsync()
     }
 
@@ -188,7 +201,8 @@ class TtsManager(
             val v = pickVoice(t, s)
             if (v != null) t.setVoice(v) else t.setLanguage(Locale.UK)
         }
-        if (t.speak(text, TextToSpeech.QUEUE_ADD, null, id) == TextToSpeech.ERROR) {
+        val params = Bundle().apply { putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, s.voiceVolume.coerceIn(0f, 1f)) }
+        if (t.speak(text, TextToSpeech.QUEUE_ADD, params, id) == TextToSpeech.ERROR) {
             localCbs.remove(id); onStart?.invoke(0); finishOne()
         }
     }

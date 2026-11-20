@@ -18,6 +18,10 @@ import com.jarvis.ai.data.Settings
 import com.jarvis.ai.data.SettingsRepo
 import com.jarvis.ai.net.ApiClient
 import com.jarvis.ai.net.ChatMsg
+import com.jarvis.ai.server.FreeLlmServer
+import com.jarvis.ai.server.ServerStatus
+import kotlinx.coroutines.withTimeoutOrNull
+import java.io.IOException
 import com.jarvis.ai.voice.SttManager
 import com.jarvis.ai.voice.TtsManager
 import kotlinx.coroutines.CancellationException
@@ -86,8 +90,44 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             val s = repo.load()
             tts.settings = s
             settings.value = s
+            startServerMonitor()
         }
         tts.onIdle = { resumeListeningIfNeeded() }
+    }
+
+    // ---------- FreeLLMAPI connection: health monitor, reconnect, Start / Stop / Restart ----------
+    val serverStatus: StateFlow<ServerStatus> = FreeLlmServer.status
+    private var monitorJob: Job? = null
+
+    /**
+     * Polls <server>/api/ping. It only runs while the app is visible (or auto-start is on) so an idle phone is not
+     * woken for nothing. After two failed probes it asks Termux to start the server (rate-limited, never a duplicate:
+     * the control script refuses to start a second instance).
+     */
+    private fun startServerMonitor() {
+        if (monitorJob?.isActive == true) return
+        monitorJob = viewModelScope.launch {
+            while (true) {
+                val s = settings.value
+                if (s != null && s.endpoint.isNotBlank() && (JarvisApp.foreground || s.autoStartServer)) {
+                    val was = FreeLlmServer.status.value
+                    val ok = FreeLlmServer.check(api, s)
+                    if (ok && was is ServerStatus.Offline) toast.value = "AI server reconnected."
+                    if (!ok && FreeLlmServer.consecutiveFailures() >= 2) FreeLlmServer.maybeRecover(appCtx, s)
+                }
+                delay(if (FreeLlmServer.status.value is ServerStatus.Online) 20_000 else 8_000)
+            }
+        }
+    }
+
+    fun refreshServer(draft: Settings) { viewModelScope.launch { FreeLlmServer.check(api, draft) } }
+
+    fun serverCommand(action: String) {
+        toast.value = FreeLlmServer.command(appCtx, action)
+        viewModelScope.launch {
+            delay(4000)
+            settings.value?.let { FreeLlmServer.check(api, it) }
+        }
     }
 
     // ---------- settings ----------
@@ -129,36 +169,82 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Hey-JARVIS panel opened: fresh chat, start listening at once. */
-    // ----- wake-word intro sound (res/raw/jarvis_intro.mp3) -----
+    // ----- wake-word greeting: generated text, spoken live by the same TTS voice as every other reply -----
+    /** True from wake activation until the spoken greeting has finished (the panel shows "Speaking"). */
     val introPlaying = MutableStateFlow(false)
-    private var introPlayer: android.media.MediaPlayer? = null
+    private var greetJob: Job? = null
+    private var lastWakeAt = 0L
 
     private fun stopIntro() {
-        introPlayer?.let { try { it.stop() } catch (e: Exception) { }; it.release() }
-        introPlayer = null
+        greetJob?.cancel(); greetJob = null
+        if (introPlaying.value) tts.stop()
         introPlaying.value = false
     }
 
-    /** Plays the intro, then starts listening. Tapping the mic skips it. Falls back to listening at once if it cannot play. */
-    private fun playIntroThenListen(s: Settings) {
-        stopIntro()
-        val mp = try { android.media.MediaPlayer.create(appCtx, R.raw.jarvis_intro) } catch (e: Exception) { null }
-        if (mp == null) { startListening(s); return }
-        mp.setAudioAttributes(android.media.AudioAttributes.Builder()
-            .setUsage(android.media.AudioAttributes.USAGE_ASSISTANT)
-            .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH).build())
-        mp.setOnCompletionListener {
-            stopIntro()
-            if (assistOpen && !assistMuted.value && !busy.value) startListening(s)
+    private fun timeOfDay(): String {
+        val h = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+        return when { h < 5 -> "Good evening"; h < 12 -> "Good morning"; h < 18 -> "Good afternoon"; else -> "Good evening" }
+    }
+
+    /** Fills the template placeholders: {greeting} (time-aware), {time}, {date}. */
+    fun renderGreeting(template: String): String {
+        val now = Date()
+        return template.ifBlank { com.jarvis.ai.data.DEFAULT_GREETING }
+            .replace("{greeting}", timeOfDay())
+            .replace("{time}", SimpleDateFormat("h:mm a", Locale.UK).format(now))
+            .replace("{date}", SimpleDateFormat("EEEE d MMMM", Locale.UK).format(now))
+    }
+
+    /** Template greeting, or one written by the model when enabled (2.5 s budget, then the template). */
+    private suspend fun buildGreeting(s: Settings): String {
+        val fallback = renderGreeting(s.greeting)
+        if (!s.aiGreeting || s.endpoint.isBlank()) return fallback
+        val line = withTimeoutOrNull(2500) {
+            try {
+                api.chatOnce(s, listOf(
+                    ChatMsg("system", "You are JARVIS, a composed, dry-witted British AI butler. Reply with ONE short spoken greeting (max 14 words) that confirms you are online and ready. Address the user as \"sir\". No emojis, no quotes."),
+                    ChatMsg("user", "It is ${timeOfDay().removePrefix("Good ").lowercase()}, ${SimpleDateFormat("h:mm a", Locale.UK).format(Date())}. The user just said your wake word."),
+                ), 60).trim().trim('"').takeIf { it.isNotBlank() && it.length <= 160 }
+            } catch (e: CancellationException) { throw e } catch (e: Exception) { null }
         }
-        mp.setOnErrorListener { _, _, _ -> stopIntro(); if (assistOpen) startListening(s); true }
-        introPlayer = mp
+        return line ?: fallback
+    }
+
+    /**
+     * Wake activation: speak the greeting through [tts] (Fish Audio JARVIS voice, or the on-device voice if that is
+     * unavailable), then start listening. Tapping the mic during the greeting skips it.
+     */
+    private fun greetThenListen(s: Settings) {
+        stopIntro()
         introPlaying.value = true
-        mp.start()
+        voiceSession = false                       // so tts.onIdle does not start a second listener; we do it below
+        greetJob = viewModelScope.launch {
+            try {
+                val text = buildGreeting(s)
+                if (!assistOpen) return@launch
+                tts.enqueue(cleanForSpeech(text))
+                withTimeoutOrNull(20_000) { tts.speaking.first { !it } }
+            } finally {
+                withContext(NonCancellable) { introPlaying.value = false }
+            }
+            if (assistOpen && !assistMuted.value && !busy.value && !stt.listening.value) startListening(s)
+        }
+    }
+
+    /** Settings-screen "Test greeting": speaks the greeting exactly as a wake activation would. */
+    fun previewGreeting(draft: Settings) {
+        viewModelScope.launch {
+            tts.stop(); tts.settings = draft
+            tts.enqueue(cleanForSpeech(buildGreeting(draft)))
+        }
     }
 
     fun assistStart(fromWake: Boolean = false) {
         val s = settings.value ?: return
+        // The same wake event can arrive twice (detector + notification, onNewIntent...). One greeting only.
+        val now = System.currentTimeMillis()
+        if (fromWake && (introPlaying.value || now - lastWakeAt < 4000)) return
+        if (fromWake) lastWakeAt = now
         assistOpen = true
         assistMuted.value = false
         idleRetries = 0
@@ -166,7 +252,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         tts.stop()
         if (savedSession == null) savedSession = currentSession.value
         newChat()                                   // the panel gets its own session; the main app's chat is restored afterwards
-        if (fromWake) playIntroThenListen(s) else startListening(s)
+        if (fromWake) greetThenListen(s) else startListening(s)
     }
 
     /** Panel closed: stop listening/speaking unless an agent task is carrying on in the background. */
@@ -372,9 +458,27 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         resetReveal()
         streaming.value = ""
         try {
-            api.chatStream(useS, msgs).collect { chunk ->
-                sb.append(chunk)
-                if (s.autoVoice) cursor = flushSpeech(sb, cursor, false) else streaming.value = sb.toString()
+            var attempt = 0
+            while (true) {
+                try {
+                    api.chatStream(useS, msgs).collect { chunk ->
+                        sb.append(chunk)
+                        if (s.autoVoice) cursor = flushSpeech(sb, cursor, false) else streaming.value = sb.toString()
+                    }
+                    break
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: IOException) {
+                    if (sb.isNotEmpty()) throw e                        // part of the answer was already spoken: never repeat it
+                    val msg = e.message.orEmpty()
+                    val viaRouter = FreeLlmServer.isLocalEndpoint(useS) || useS.endpoint.contains(":3001")
+                    if (viaRouter && useS.model != "auto" && (msg.startsWith("HTTP 404") || msg.contains("model_not_found"))) {
+                        useS = useS.copy(model = "auto"); continue      // chosen model vanished: let FreeLLMAPI's router pick
+                    }
+                    val transient = (!msg.startsWith("HTTP 4") || msg.startsWith("HTTP 429")) && !msg.contains("no_providers_configured")
+                    if (transient && attempt < 2) { attempt++; delay(1200L * attempt); continue }   // brief outage: reconnect
+                    throw e
+                }
             }
             if (s.autoVoice) {
                 cursor = flushSpeech(sb, cursor, true)
