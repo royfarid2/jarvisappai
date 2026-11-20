@@ -29,6 +29,14 @@ class SecureStore(private val ctx: Context) {
         get() = prefs.getString("api_key", "") ?: ""
         set(v) { prefs.edit().putString("api_key", v).apply() }
 
+    var groqKey: String
+        get() = prefs.getString("groq_key", "") ?: ""
+        set(v) { prefs.edit().putString("groq_key", v).apply() }
+
+    var llmKey: String
+        get() = prefs.getString("llm_key", "") ?: ""
+        set(v) { prefs.edit().putString("llm_key", v).apply() }
+
     var fishKey: String
         get() = prefs.getString("fish_key", "") ?: ""
         set(v) { prefs.edit().putString("fish_key", v).apply() }
@@ -42,8 +50,14 @@ class SettingsRepo(private val ctx: Context) {
     suspend fun load(): Settings = withContext(Dispatchers.IO) {
         val p = ctx.dataStore.data.first()
         val d = Settings()
+        val ep = p[ENDPOINT] ?: d.endpoint
+        // older installs have no provider yet: infer it from the saved endpoint and keep their key
+        val prov = p[PROVIDER] ?: if (ep.contains("groq")) "groq" else if (p[ENDPOINT] == null) "freellm" else "custom"
         Settings(
-            endpoint = p[ENDPOINT] ?: d.endpoint,
+            provider = prov,
+            groqKey = secure.groqKey.ifBlank { if (prov == "groq") secure.apiKey else "" },
+            llmKey = secure.llmKey.ifBlank { if (prov == "freellm") secure.apiKey else "" },
+            endpoint = ep,
             apiKey = secure.apiKey,
             model = p[MODEL] ?: d.model,
             voiceName = p[VOICE] ?: d.voiceName,
@@ -72,6 +86,7 @@ class SettingsRepo(private val ctx: Context) {
     suspend fun save(s: Settings) = withContext(Dispatchers.IO) {
         secure.apiKey = s.apiKey.trim()
         secure.fishKey = s.fishKey.trim()
+        secure.groqKey = s.groqKey.trim(); secure.llmKey = s.llmKey.trim()
         ctx.dataStore.edit { p ->
             p[ENDPOINT] = s.endpoint.trim(); p[MODEL] = s.model.trim(); p[VOICE] = s.voiceName
             p[RATE] = s.rate; p[PITCH] = s.pitch; p[LANG] = s.language; p[DARK] = s.dark
@@ -81,7 +96,7 @@ class SettingsRepo(private val ctx: Context) {
             p[ONBOARDED] = s.onboarded
             p[VOICE_VOL] = s.voiceVolume.coerceIn(0f, 1f); p[VOICE_BOOST] = s.voiceBoostDb.coerceIn(0, 12)
             p[GREETING] = s.greeting.ifBlank { DEFAULT_GREETING }; p[AI_GREETING] = s.aiGreeting
-            p[AUTO_SERVER] = s.autoStartServer
+            p[AUTO_SERVER] = s.autoStartServer; p[PROVIDER] = s.provider
         }
     }
 
@@ -107,5 +122,6 @@ class SettingsRepo(private val ctx: Context) {
         val GREETING = stringPreferencesKey("greeting")
         val AI_GREETING = booleanPreferencesKey("ai_greeting")
         val AUTO_SERVER = booleanPreferencesKey("auto_server")
+        val PROVIDER = stringPreferencesKey("provider")
     }
 }

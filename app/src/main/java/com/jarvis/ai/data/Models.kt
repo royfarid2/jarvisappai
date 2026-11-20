@@ -29,10 +29,16 @@ data class Settings(
     val greeting: String = DEFAULT_GREETING,
     val aiGreeting: Boolean = false,     // let the model write the greeting (falls back to the template if slow)
     // --- FreeLLMAPI server supervision (Termux on the phone, or just monitoring a PC/Pi on the LAN) ---
-    val autoStartServer: Boolean = false,
+    val autoStartServer: Boolean = true,
+    // --- provider choice: "groq" (own Groq key) or "freellm" (FreeLLMAPI, auto-started) ---
+    val provider: String = "freellm",
+    val groqKey: String = "",
+    val llmKey: String = "",
 )
 
 const val DEFAULT_GREETING = "{greeting}, sir. Jarvis is online. How may I assist you?"
+const val GROQ_ENDPOINT = "https://api.groq.com/openai/v1"
+const val GROQ_MODEL = "openai/gpt-oss-20b"
 const val FREELLM_ENDPOINT = "http://127.0.0.1:3001/v1"
 
 @Entity(tableName = "sessions")

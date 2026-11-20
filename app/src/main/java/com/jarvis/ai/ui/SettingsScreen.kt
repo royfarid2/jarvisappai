@@ -25,6 +25,8 @@ import com.jarvis.ai.agent.JarvisAccessibilityService
 import com.jarvis.ai.assist.HotwordService
 import com.jarvis.ai.MainViewModel
 import com.jarvis.ai.data.FREELLM_ENDPOINT
+import com.jarvis.ai.data.GROQ_ENDPOINT
+import com.jarvis.ai.data.GROQ_MODEL
 import com.jarvis.ai.data.Settings
 import com.jarvis.ai.server.FreeLlmServer
 import com.jarvis.ai.server.ServerStatus
@@ -79,13 +81,36 @@ fun SettingsScreen(vm: MainViewModel, current: Settings, onBack: () -> Unit) {
             Spacer(Modifier.width(8.dp))
         }
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            Section("AI connection")
-            ConnectionFields(vm, d) { d = it }
-            OutlinedButton({ d = d.copy(endpoint = FREELLM_ENDPOINT, model = "auto") }, Modifier.fillMaxWidth()) {
-                Text("Use FreeLLMAPI on this phone (127.0.0.1:3001)")
+            Section("AI provider")
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(d.provider == "groq", { d = d.copy(provider = "groq", endpoint = GROQ_ENDPOINT, model = GROQ_MODEL, apiKey = d.groqKey) }, { Text("Groq") })
+                FilterChip(d.provider == "freellm", { d = d.copy(provider = "freellm", endpoint = FREELLM_ENDPOINT, model = "auto", apiKey = d.llmKey, autoStartServer = true) }, { Text("FreeLLMAPI") })
             }
+            if (d.provider == "groq") {
+                OutlinedTextField(d.groqKey, { d = d.copy(groqKey = it, apiKey = it) }, Modifier.fillMaxWidth(),
+                    label = { Text("Groq API key") }, singleLine = true,
+                    supportingText = { Text("From console.groq.com/keys. No server needed.") })
+            }
+            if (d.provider == "freellm") {
+                OutlinedTextField(d.llmKey, { d = d.copy(llmKey = it, apiKey = it) }, Modifier.fillMaxWidth(),
+                    label = { Text("FreeLLMAPI unified key (freellmapi-...)") }, singleLine = true,
+                    supportingText = { Text("Printed by the setup command below. Starts automatically when you open JARVIS.") })
+                OutlinedButton({
+                    val cm = ctx.getSystemService(android.content.ClipboardManager::class.java)
+                    cm.setPrimaryClip(android.content.ClipData.newPlainText("JARVIS setup", vm.termuxSetupCommand()))
+                    vm.say("Copied. Open Termux, paste, press Enter.")
+                }, Modifier.fillMaxWidth()) { Text("Copy one-time Termux setup command") }
+                Text(
+                    "One time only: install Termux (from F-Droid), open it, paste the command and wait. It installs the server, starts it, creates the account " +
+                        "and prints your unified key (paste it above). Add a provider key such as Groq on the server's Keys page (http://127.0.0.1:3001). " +
+                        "After that JARVIS starts the server by itself every time you open it.",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Text("Advanced: custom endpoint / model", style = MaterialTheme.typography.titleMedium)
+            ConnectionFields(vm, d) { d = it }
             val st = serverStatus
-            Text(
+            if (d.provider != "groq") Text(
                 when (st) {
                     is ServerStatus.Online -> "FreeLLMAPI server: online (${st.latencyMs} ms)"
                     is ServerStatus.Offline -> "FreeLLMAPI server: offline (${st.reason})"
@@ -95,7 +120,7 @@ fun SettingsScreen(vm: MainViewModel, current: Settings, onBack: () -> Unit) {
                 style = MaterialTheme.typography.bodyMedium,
                 color = if (st is ServerStatus.Online) Cyan else MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (d.provider != "groq") Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton({ vm.serverCommand("start") }, Modifier.weight(1f)) { Text("Start") }
                 OutlinedButton({ vm.serverCommand("stop") }, Modifier.weight(1f)) { Text("Stop") }
                 OutlinedButton({ vm.serverCommand("restart") }, Modifier.weight(1f)) { Text("Restart") }

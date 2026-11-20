@@ -107,17 +107,29 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private fun startServerMonitor() {
         if (monitorJob?.isActive == true) return
         monitorJob = viewModelScope.launch {
+            var first = true
             while (true) {
                 val s = settings.value
-                if (s != null && s.endpoint.isNotBlank() && (JarvisApp.foreground || s.autoStartServer)) {
+                if (s != null && s.provider != "groq" && s.endpoint.isNotBlank() && (JarvisApp.foreground || s.autoStartServer)) {
                     val was = FreeLlmServer.status.value
                     val ok = FreeLlmServer.check(api, s)
                     if (ok && was is ServerStatus.Offline) toast.value = "AI server reconnected."
-                    if (!ok && FreeLlmServer.consecutiveFailures() >= 2) FreeLlmServer.maybeRecover(appCtx, s)
+                    // at app launch a dead server is started at once; later only after two failed probes
+                    if (!ok && (first || FreeLlmServer.consecutiveFailures() >= 2)) FreeLlmServer.maybeRecover(appCtx, s)
+                    first = false
                 }
                 delay(if (FreeLlmServer.status.value is ServerStatus.Online) 20_000 else 8_000)
             }
         }
+    }
+
+    /** The one-time Termux setup command (script + permissions + install + start + account + key), ready to paste. */
+    fun termuxSetupCommand(): String {
+        val script = appCtx.assets.open("freellmapi-ctl.sh").bufferedReader().use { it.readText() }
+        return "cat > ~/freellmapi-ctl.sh <<'JARVIS_EOF'\n$script\nJARVIS_EOF\n" +
+            "chmod +x ~/freellmapi-ctl.sh; mkdir -p ~/.termux; " +
+            "grep -q '^allow-external-apps' ~/.termux/termux.properties 2>/dev/null || echo 'allow-external-apps=true' >> ~/.termux/termux.properties\n" +
+            "~/freellmapi-ctl.sh setup && ~/freellmapi-ctl.sh start && ~/freellmapi-ctl.sh bootstrap\n"
     }
 
     fun refreshServer(draft: Settings) { viewModelScope.launch { FreeLlmServer.check(api, draft) } }
