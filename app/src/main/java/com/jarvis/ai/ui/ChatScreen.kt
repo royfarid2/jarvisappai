@@ -249,45 +249,19 @@ fun ChatScreen(vm: MainViewModel, s: Settings, openSettings: () -> Unit) {
                             Text(if (busy) "Stop" else "Stop speaking")
                         }
                     }
-                    Row(verticalAlignment = Alignment.Bottom) {
-                        FilledIconButton(
-                            {
-                                if (agentOn) vm.agentMode.value = false
-                                else if (JarvisAccessibilityService.isEnabled(ctx)) vm.agentMode.value = true
-                                else askAgent = true
-                            },
-                            Modifier.size(52.dp),
-                            colors = IconButtonDefaults.filledIconButtonColors(
-                                containerColor = if (agentOn) Cyan else MaterialTheme.colorScheme.surfaceVariant,
-                                contentColor = if (agentOn) MaterialTheme.colorScheme.onPrimary else Cyan,
-                            ),
-                        ) { Icon(Icons.Filled.Bolt, if (agentOn) "Agent mode on" else "Agent mode off") }
-                        Spacer(Modifier.width(8.dp))
-                        TextField(
-                            input, { input = it }, Modifier.weight(1f),
-                            placeholder = { Text(if (agentOn) "Tell JARVIS what to do on your phone" else "Message JARVIS (or ask it to do something)") }, maxLines = 5,
-                            shape = RoundedCornerShape(24.dp),
-                            colors = TextFieldDefaults.colors(
-                                focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-                                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-                                focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent,
-                            ),
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        if (input.isBlank()) {
-                            FilledIconButton(
-                                { onMic() }, Modifier.size(52.dp),
-                                colors = IconButtonDefaults.filledIconButtonColors(
-                                    containerColor = if (listening) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
-                                    contentColor = MaterialTheme.colorScheme.onPrimary,
-                                ),
-                            ) { Icon(if (listening) Icons.Filled.Stop else Icons.Filled.Mic, if (listening) "Stop listening" else "Speak") }
-                        } else {
-                            FilledIconButton({ vm.send(input); input = "" }, Modifier.size(52.dp), enabled = !busy) {
-                                Icon(Icons.AutoMirrored.Filled.Send, "Send")
-                            }
-                        }
-                    }
+                    Composer(
+                        vm = vm, s = s, input = input, onInput = { input = it }, busy = busy, listening = listening,
+                        agentOn = agentOn,
+                        onAgent = {
+                            if (agentOn) vm.agentMode.value = false
+                            else if (JarvisAccessibilityService.isEnabled(ctx)) vm.agentMode.value = true
+                            else askAgent = true
+                        },
+                        onMic = { onMic() },
+                        onVoiceMode = { com.jarvis.ai.assist.AssistLauncher.show(ctx) },
+                        onSend = { text -> vm.send(text); input = "" },
+                        openSettings = openSettings,
+                    )
                 }
             }
         }
@@ -335,6 +309,139 @@ private fun EmptyState(onSuggest: (String) -> Unit) {
                 shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
                 border = BorderStroke(1.dp, Cyan.copy(alpha = 0.25f)),
             ) { Text(it, Modifier.padding(horizontal = 16.dp, vertical = 9.dp), style = MaterialTheme.typography.bodyMedium) }
+        }
+    }
+}
+
+
+/** ChatGPT-style composer in JARVIS colours: text on top, round "+", model chip, mic and voice mode underneath. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun Composer(
+    vm: MainViewModel, s: Settings, input: String, onInput: (String) -> Unit, busy: Boolean, listening: Boolean,
+    agentOn: Boolean, onAgent: () -> Unit, onMic: () -> Unit, onVoiceMode: () -> Unit,
+    onSend: (String) -> Unit, openSettings: () -> Unit,
+) {
+    val ctx = LocalContext.current
+    var files by remember { mutableStateOf(listOf<Pair<String, String>>()) }      // display name to text content
+    var pickModel by remember { mutableStateOf(false) }
+
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        val added = mutableListOf<Pair<String, String>>()
+        for (u in uris) {
+            try {
+                val name = ctx.contentResolver.query(u, null, null, null, null)?.use { c ->
+                    val i = c.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                    if (c.moveToFirst() && i >= 0) c.getString(i) else null
+                } ?: "file"
+                val bytes = ctx.contentResolver.openInputStream(u)?.use { it.readBytes().let { b -> if (b.size > 200_000) b.copyOf(200_000) else b } }
+                if (bytes == null || bytes.any { it.toInt() == 0 }) {
+                    vm.toast.value = "$name isn't a text file. Only text-based files (txt, md, csv, json, code, logs) can be read for now."
+                } else {
+                    val t = String(bytes, Charsets.UTF_8)
+                    added += name to (if (t.length > 12_000) t.take(12_000) + "\n…[truncated]" else t)
+                }
+            } catch (e: Exception) { vm.toast.value = "Could not read that file." }
+        }
+        files = files + added
+    }
+
+    if (pickModel) {
+        val test by vm.test.collectAsState()
+        LaunchedEffect(Unit) { vm.testConnection(s) }
+        ModalBottomSheet({ pickModel = false }) {
+            Column(Modifier.padding(horizontal = 20.dp).padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("AI model", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "Provider: " + when (s.provider) { "groq" -> "Groq"; "freellm" -> "FreeLLMAPI"; else -> "Custom" } + "  ·  current: " + s.model,
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                when {
+                    test.running -> CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
+                    test.models.isEmpty() -> Text(test.message ?: "No model list available from this provider. Type the model name in Settings.",
+                        style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    else -> LazyColumn(Modifier.heightIn(max = 360.dp)) {
+                        items(test.models.size) { i ->
+                            val m = test.models[i]
+                            ListItem(
+                                headlineContent = { Text(m, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                trailingContent = { if (m == s.model) Icon(Icons.Filled.Check, null, tint = Cyan) },
+                                modifier = Modifier.clickable { vm.saveSettings(s.copy(model = m)); pickModel = false },
+                                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                            )
+                        }
+                    }
+                }
+                TextButton({ pickModel = false; openSettings() }) { Text("Change provider or key") }
+            }
+        }
+    }
+
+    Surface(
+        Modifier.fillMaxWidth(), shape = RoundedCornerShape(28.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+    ) {
+        Column(Modifier.padding(horizontal = 8.dp, vertical = 6.dp)) {
+            if (files.isNotEmpty()) {
+                androidx.compose.foundation.lazy.LazyRow(Modifier.padding(start = 8.dp, top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    items(files.size) { i ->
+                        InputChip(
+                            false, { files = files.filterIndexed { idx, _ -> idx != i } },
+                            { Text(files[i].first, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 160.dp)) },
+                            leadingIcon = { Icon(Icons.Filled.Description, null, Modifier.size(16.dp)) },
+                            trailingIcon = { Icon(Icons.Filled.Close, "Remove", Modifier.size(16.dp)) },
+                        )
+                    }
+                }
+            }
+            TextField(
+                input, onInput, Modifier.fillMaxWidth(), maxLines = 6,
+                placeholder = { Text(if (agentOn) "Tell JARVIS what to do on your phone" else "Message JARVIS", color = MaterialTheme.colorScheme.onSurfaceVariant) },
+                colors = TextFieldDefaults.colors(
+                    focusedContainerColor = Color.Transparent, unfocusedContainerColor = Color.Transparent,
+                    focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent,
+                ),
+            )
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                FilledIconButton(
+                    { picker.launch(arrayOf("*/*")) }, Modifier.size(44.dp),
+                    colors = IconButtonDefaults.filledIconButtonColors(containerColor = MaterialTheme.colorScheme.surface, contentColor = MaterialTheme.colorScheme.onSurface),
+                ) { Icon(Icons.Filled.Add, "Attach files") }
+                Spacer(Modifier.width(8.dp))
+                Surface(
+                    { pickModel = true }, shape = RoundedCornerShape(22.dp), color = MaterialTheme.colorScheme.surface,
+                    modifier = Modifier.height(44.dp).weight(1f, fill = false),
+                ) {
+                    Row(Modifier.padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(s.model.substringAfterLast('/').ifBlank { "Model" }, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium)
+                        Icon(Icons.Filled.KeyboardArrowDown, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+                Spacer(Modifier.weight(1f))
+                IconButton(onAgent, Modifier.size(44.dp)) { Icon(Icons.Filled.Bolt, if (agentOn) "Agent mode on" else "Agent mode off", tint = if (agentOn) Cyan else MaterialTheme.colorScheme.onSurfaceVariant) }
+                FilledIconButton(
+                    onMic, Modifier.size(44.dp),
+                    colors = IconButtonDefaults.filledIconButtonColors(
+                        containerColor = if (listening) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.surface,
+                        contentColor = if (listening) Color.White else MaterialTheme.colorScheme.onSurface),
+                ) { Icon(if (listening) Icons.Filled.Stop else Icons.Filled.Mic, if (listening) "Stop listening" else "Speak") }
+                Spacer(Modifier.width(8.dp))
+                if (input.isBlank() && files.isEmpty()) {
+                    FilledIconButton(onVoiceMode, Modifier.size(48.dp), colors = IconButtonDefaults.filledIconButtonColors(containerColor = Cyan, contentColor = MaterialTheme.colorScheme.onPrimary)) {
+                        Icon(Icons.Filled.GraphicEq, "Voice mode")
+                    }
+                } else {
+                    FilledIconButton(
+                        {
+                            val attached = files.joinToString("") { (n, t) -> "\n\n[Attached file: $n]\n```\n$t\n```" }
+                            onSend(input.trim() + attached); files = emptyList()
+                        },
+                        Modifier.size(48.dp), enabled = !busy,
+                        colors = IconButtonDefaults.filledIconButtonColors(containerColor = Cyan, contentColor = MaterialTheme.colorScheme.onPrimary),
+                    ) { Icon(Icons.Filled.ArrowUpward, "Send") }
+                }
+            }
         }
     }
 }
