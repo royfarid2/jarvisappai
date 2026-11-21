@@ -27,7 +27,7 @@ import kotlin.coroutines.resume
  *    with its duration in ms. The UI uses it to reveal text exactly in step with the voice.
  */
 class TtsManager(
-    ctx: Context,
+    private val ctx: Context,
     private val cloudSynth: suspend (Settings, String) -> File?,
 ) {
     @Volatile var settings = Settings()
