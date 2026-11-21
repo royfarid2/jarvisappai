@@ -15,6 +15,13 @@ OpenAI-compatible AI, hear replies in a British male voice, and control parts of
   language, theme, auto-voice, permissions, clear history. Preferences in DataStore.
 - Local notifications and timed reminders.
 
+## AI provider (Groq / FreeLLMAPI / Custom)
+Settings > AI provider: pick Groq, FreeLLMAPI or Custom; each keeps its own endpoint, key and model. *Test connection* loads
+the model list from the endpoint. FreeLLMAPI (github.com/tashfeenahmed/freellmapi) is a local OpenAI-compatible gateway that
+fails over between free providers; install it on the phone with `scripts/termux-freellmapi.sh` (Termux), add your provider
+keys in its dashboard, and paste its unified `freellmapi-...` key here (model `auto`).
+Not done: starting/restarting the server from inside JARVIS and a server status indicator.
+
 ## Chat, sessions and code
 - Multiple **chat sessions** (drawer): new chat, auto-titled, rename, delete; each keeps its own context.
 - Voice and text are **in sync**: each sentence's text types out as you hear it (Fish Audio synthesises the next
@@ -52,37 +59,10 @@ Arabic equivalents work too (e.g. "افتح يوتيوب", "شغل الفلاش"
 
 Add a command: create a class extending `RegexAction` in `actions/Actions.kt` and add it to `ActionRegistry.actions`.
 
-## FreeLLMAPI backend (primary AI)
-JARVIS now defaults to [FreeLLMAPI](https://github.com/tashfeenahmed/freellmapi): one OpenAI-compatible endpoint that routes
-across many free-tier providers and fails over between them when one is rate-limited. Model `auto` lets its router pick.
-Any other OpenAI-compatible URL (Groq, OpenAI, Ollama...) still works from Settings.
-
-FreeLLMAPI is a Node.js + SQLite service, so **it cannot be bundled inside the APK**. Two ways to run it:
-1. **PC / Raspberry Pi / VPS / Docker (recommended):** `HOST=0.0.0.0 bash scripts/install-freellmapi.sh`, then set the JARVIS
-   endpoint to `http://<that-machine-ip>:3001/v1`. JARVIS monitors it and reconnects automatically; Start/Stop/Restart do not apply.
-2. **On the phone under Termux (experimental):** copy `scripts/freellmapi-ctl.sh` to `~/`, run `./freellmapi-ctl.sh setup` once
-   (compiles a native SQLite module; may fail on some devices), enable `allow-external-apps=true` in `~/.termux/termux.properties`,
-   grant JARVIS the *Run commands in Termux* permission. Then Settings > Start / Stop / Restart and *Auto-start and recover* work.
-
-**You must supply:** a dashboard account (first run), at least one provider API key (added in the FreeLLMAPI dashboard, never in the
-app), and the unified `freellmapi-...` key pasted into JARVIS Settings > API key. Without a provider key the server answers
-HTTP 503 `no_providers_configured`, which JARVIS shows as-is. Check everything with
-`bash scripts/verify-freellmapi.sh http://<host>:3001 <unified-key>` (health, auth, /v1/models, chat, real SSE streaming).
-
-In the app: server status (ping latency) in Settings, model chips loaded from `/v1/models`, retry with backoff on network drops
-(only before any text was spoken), automatic fall back to `auto` if a chosen model disappears.
-
-## Wake greeting and loudness
-- The wake greeting is **text spoken live by the normal JARVIS voice** (Fish Audio, or the on-device voice) - the prerecorded MP3 was
-  removed. Edit it in Settings; placeholders `{greeting}` `{time}` `{date}`; optional "Let the AI write the greeting" (2.5 s limit,
-  then the template). The notification action *Wake JARVIS* runs the identical activation. Repeat wake events within 4 s are ignored.
-- Loudness: *Voice volume* (0-1) and *Extra gain* (0-12 dB via Android LoudnessEnhancer; high values can distort) are saved. They are
-  software only: Android does not let apps exceed the phone's volume, so a button sets the media stream to its maximum.
-
 ## Honest limitations
 - **Voice:** no Marvel audio is bundled. The JARVIS voice is a community voice model hosted by Fish Audio and generated
   with your own Fish API key (credits/limits apply). Without a key, the app uses your phone's British male voice.
-- **Wake word, greeting, loudness, Termux control:** written without an Android SDK available, so **not compiled or run on a device** - build via CI and test on your phone. Wake word also still unverified on a device; accuracy and
+- **Wake word:** implemented with Sherpa-ONNX but not yet tested on a device by the author of this change; accuracy and
   battery use need real-world checking.
 - **Android restrictions:** other apps' notifications are only readable after you enable Notification Access;
   Android cannot set the volume above hardware limits or silently start activities from the background;

@@ -91,25 +91,6 @@ class ApiClient {
             }
     }
 
-    /**
-     * FreeLLMAPI liveness probe: GET <origin>/api/ping (no auth needed). Success = round-trip time in ms.
-     * Any other server (Groq, OpenAI...) has no such route, so it reports as "not a FreeLLMAPI server".
-     */
-    suspend fun ping(s: Settings): Result<Long> = withContext(Dispatchers.IO) {
-        runCatching {
-            val b = base(s)
-            require(b.startsWith("http://") || b.startsWith("https://")) { "Endpoint must start with http:// or https://" }
-            val origin = b.removeSuffix("/v1").trimEnd('/')
-            val t0 = System.nanoTime()
-            val quick = http.newBuilder().connectTimeout(4, TimeUnit.SECONDS).readTimeout(4, TimeUnit.SECONDS).build()
-            quick.newCall(Request.Builder().url("$origin/api/ping").get().build()).execute().use { r ->
-                if (!r.isSuccessful) throw IOException("HTTP ${r.code}")
-                if (JSONObject(r.body?.string().orEmpty()).optString("status") != "ok") throw IOException("unexpected ping reply")
-            }
-            (System.nanoTime() - t0) / 1_000_000
-        }
-    }
-
     /** Returns the list of model ids (may be empty if the server has no /models route). */
     suspend fun test(s: Settings): Result<List<String>> = withContext(Dispatchers.IO) {
         runCatching {

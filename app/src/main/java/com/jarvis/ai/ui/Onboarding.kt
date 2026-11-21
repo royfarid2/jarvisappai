@@ -84,6 +84,26 @@ fun ConnectionFields(vm: MainViewModel, d: Settings, onChange: (Settings) -> Uni
     val test by vm.test.collectAsState()
     var showKey by remember { mutableStateOf(false) }
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text("AI provider", style = MaterialTheme.typography.labelLarge)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf("groq" to "Groq", "freellm" to "FreeLLMAPI", "custom" to "Custom").forEach { (id, label) ->
+                FilterChip(d.provider == id, {
+                    if (d.provider != id) {
+                        val saved = d.profiles + (d.provider to com.jarvis.ai.data.AiProfile(d.endpoint, d.apiKey, d.model))
+                        val p = saved[id] ?: when (id) {
+                            "groq" -> com.jarvis.ai.data.AiProfile("https://api.groq.com/openai/v1", "", "openai/gpt-oss-20b")
+                            "freellm" -> com.jarvis.ai.data.AiProfile("http://127.0.0.1:3001/v1", "", "auto")
+                            else -> com.jarvis.ai.data.AiProfile("", "", "")
+                        }
+                        onChange(d.copy(provider = id, profiles = saved, endpoint = p.endpoint, apiKey = p.apiKey, model = p.model))
+                    }
+                }, { Text(label) })
+            }
+        }
+        when (d.provider) {
+            "groq" -> Text("Paste your Groq key (console.groq.com/keys).", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            "freellm" -> Text("Key: the freellmapi-… unified key from your FreeLLMAPI dashboard (Keys page). The server must be running; model \"auto\" lets it pick and fail over between providers.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
         OutlinedTextField(
             d.endpoint, { onChange(d.copy(endpoint = it)) }, Modifier.fillMaxWidth(),
             label = { Text("API endpoint URL") }, placeholder = { Text("https://api.openai.com/v1") },

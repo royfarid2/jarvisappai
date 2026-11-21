@@ -3,8 +3,6 @@ package com.jarvis.ai.voice
 import android.content.Context
 import android.media.AudioAttributes
 import android.media.MediaPlayer
-import android.media.audiofx.LoudnessEnhancer
-import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.speech.tts.TextToSpeech
@@ -53,6 +51,8 @@ class TtsManager(
     private var synthJob: Job? = null
     private var playJob: Job? = null
     private var player: MediaPlayer? = null
+    private var enhancer: android.media.audiofx.LoudnessEnhancer? = null
+    private fun releaseEnhancer() { try { enhancer?.release() } catch (e: Exception) { }; enhancer = null }
     @Volatile private var ready = false
     private var tts: TextToSpeech? = null
 
@@ -110,6 +110,7 @@ class TtsManager(
         while (true) { val r = readyQueue.tryReceive().getOrNull() ?: break; r.file?.delete() }
         try { player?.release() } catch (e: Exception) { }
         player = null
+        releaseEnhancer()
         startWorkers()
         _speaking.value = false
     }
@@ -150,34 +151,25 @@ class TtsManager(
     private suspend fun play(f: File, onStart: ((Long) -> Unit)?) = suspendCancellableCoroutine<Unit> { cont ->
         val mp = MediaPlayer()
         player = mp
-        var boost: LoudnessEnhancer? = null
-        fun releaseBoost() { try { boost?.release() } catch (e: Exception) { }; boost = null }
-        val vol = settings.voiceVolume.coerceIn(0f, 1f)
-        val boostDb = settings.voiceBoostDb.coerceIn(0, 12)
         mp.setAudioAttributes(
             AudioAttributes.Builder()
                 .setUsage(AudioAttributes.USAGE_ASSISTANT)
                 .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build()
         )
+        Loudness.maxVolume(ctx.applicationContext)
+        releaseEnhancer(); enhancer = Loudness.boost(mp)
         mp.setDataSource(f.absolutePath)
-        mp.setVolume(vol, vol)
-        mp.setOnPreparedListener { m ->
-            // Software gain above the player's 1.0 ceiling. Effect is optional: some devices refuse it.
-            if (boostDb > 0) boost = try {
-                LoudnessEnhancer(m.audioSessionId).apply { setTargetGain(boostDb * 100); enabled = true }
-            } catch (e: Exception) { null }
-            onStart?.invoke(m.duration.toLong()); m.start()
-        }
+        mp.setOnPreparedListener { m -> onStart?.invoke(m.duration.toLong()); m.start() }
         mp.setOnCompletionListener { m ->
-            releaseBoost(); m.release(); if (player === m) player = null
+            m.release(); if (player === m) { player = null; releaseEnhancer() }
             if (cont.isActive) cont.resume(Unit)
         }
         mp.setOnErrorListener { m, _, _ ->
-            releaseBoost(); m.release(); if (player === m) player = null
+            m.release(); if (player === m) { player = null; releaseEnhancer() }
             if (cont.isActive) cont.resume(Unit)
             true
         }
-        cont.invokeOnCancellation { releaseBoost(); try { mp.release() } catch (e: Exception) { } }
+        cont.invokeOnCancellation { try { mp.release() } catch (e: Exception) { } }
         mp.prepareAsync()
     }
 
@@ -201,8 +193,7 @@ class TtsManager(
             val v = pickVoice(t, s)
             if (v != null) t.setVoice(v) else t.setLanguage(Locale.UK)
         }
-        val params = Bundle().apply { putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, s.voiceVolume.coerceIn(0f, 1f)) }
-        if (t.speak(text, TextToSpeech.QUEUE_ADD, params, id) == TextToSpeech.ERROR) {
+        if (t.speak(text, TextToSpeech.QUEUE_ADD, null, id) == TextToSpeech.ERROR) {
             localCbs.remove(id); onStart?.invoke(0); finishOne()
         }
     }

@@ -29,13 +29,13 @@ class SecureStore(private val ctx: Context) {
         get() = prefs.getString("api_key", "") ?: ""
         set(v) { prefs.edit().putString("api_key", v).apply() }
 
-    var groqKey: String
-        get() = prefs.getString("groq_key", "") ?: ""
-        set(v) { prefs.edit().putString("groq_key", v).apply() }
+    var provider: String
+        get() = prefs.getString("provider", "") ?: ""
+        set(v) { prefs.edit().putString("provider", v).apply() }
 
-    var llmKey: String
-        get() = prefs.getString("llm_key", "") ?: ""
-        set(v) { prefs.edit().putString("llm_key", v).apply() }
+    var profilesJson: String
+        get() = prefs.getString("profiles", "{}") ?: "{}"
+        set(v) { prefs.edit().putString("profiles", v).apply() }
 
     var fishKey: String
         get() = prefs.getString("fish_key", "") ?: ""
@@ -50,15 +50,11 @@ class SettingsRepo(private val ctx: Context) {
     suspend fun load(): Settings = withContext(Dispatchers.IO) {
         val p = ctx.dataStore.data.first()
         val d = Settings()
-        val ep = p[ENDPOINT] ?: d.endpoint
-        // older installs have no provider yet: infer it from the saved endpoint and keep their key
-        val prov = p[PROVIDER] ?: if (ep.contains("groq")) "groq" else if (p[ENDPOINT] == null) "freellm" else "custom"
         Settings(
-            provider = prov,
-            groqKey = secure.groqKey.ifBlank { if (prov == "groq") secure.apiKey else "" },
-            llmKey = secure.llmKey.ifBlank { if (prov == "freellm") secure.apiKey else "" },
-            endpoint = ep,
+            endpoint = p[ENDPOINT] ?: d.endpoint,
             apiKey = secure.apiKey,
+            provider = secure.provider.ifBlank { if ((p[ENDPOINT] ?: d.endpoint).contains("groq.com")) "groq" else "custom" },
+            profiles = parseProfiles(secure.profilesJson),
             model = p[MODEL] ?: d.model,
             voiceName = p[VOICE] ?: d.voiceName,
             rate = p[RATE] ?: d.rate,
@@ -75,18 +71,14 @@ class SettingsRepo(private val ctx: Context) {
             agentVision = p[AGENT_VISION] ?: d.agentVision,
             hotword = p[HOTWORD] ?: d.hotword,
             onboarded = p[ONBOARDED] ?: d.onboarded,
-            voiceVolume = p[VOICE_VOL] ?: d.voiceVolume,
-            voiceBoostDb = p[VOICE_BOOST] ?: d.voiceBoostDb,
-            greeting = p[GREETING] ?: d.greeting,
-            aiGreeting = p[AI_GREETING] ?: d.aiGreeting,
-            autoStartServer = p[AUTO_SERVER] ?: d.autoStartServer,
         )
     }
 
     suspend fun save(s: Settings) = withContext(Dispatchers.IO) {
         secure.apiKey = s.apiKey.trim()
+        secure.provider = s.provider
+        secure.profilesJson = profilesToJson(s.profiles + (s.provider to AiProfile(s.endpoint.trim(), s.apiKey.trim(), s.model.trim())))
         secure.fishKey = s.fishKey.trim()
-        secure.groqKey = s.groqKey.trim(); secure.llmKey = s.llmKey.trim()
         ctx.dataStore.edit { p ->
             p[ENDPOINT] = s.endpoint.trim(); p[MODEL] = s.model.trim(); p[VOICE] = s.voiceName
             p[RATE] = s.rate; p[PITCH] = s.pitch; p[LANG] = s.language; p[DARK] = s.dark
@@ -94,10 +86,18 @@ class SettingsRepo(private val ctx: Context) {
             p[FISH_VOICE] = s.fishVoiceId.trim(); p[FISH_MODEL] = s.fishModel.trim()
             p[VISION_MODEL] = s.visionModel.trim(); p[AGENT_VISION] = s.agentVision; p[HOTWORD] = s.hotword
             p[ONBOARDED] = s.onboarded
-            p[VOICE_VOL] = s.voiceVolume.coerceIn(0f, 1f); p[VOICE_BOOST] = s.voiceBoostDb.coerceIn(0, 12)
-            p[GREETING] = s.greeting.ifBlank { DEFAULT_GREETING }; p[AI_GREETING] = s.aiGreeting
-            p[AUTO_SERVER] = s.autoStartServer; p[PROVIDER] = s.provider
         }
+    }
+
+    private fun parseProfiles(j: String): Map<String, AiProfile> = try {
+        val o = org.json.JSONObject(j)
+        o.keys().asSequence().associateWith { k -> o.getJSONObject(k).let { AiProfile(it.optString("endpoint"), it.optString("key"), it.optString("model")) } }
+    } catch (e: Exception) { emptyMap() }
+
+    private fun profilesToJson(m: Map<String, AiProfile>): String {
+        val o = org.json.JSONObject()
+        m.forEach { (k, v) -> o.put(k, org.json.JSONObject().put("endpoint", v.endpoint).put("key", v.apiKey).put("model", v.model)) }
+        return o.toString()
     }
 
     private companion object {
@@ -117,11 +117,5 @@ class SettingsRepo(private val ctx: Context) {
         val VISION_MODEL = stringPreferencesKey("vision_model")
         val AGENT_VISION = booleanPreferencesKey("agent_vision")
         val HOTWORD = booleanPreferencesKey("hotword")
-        val VOICE_VOL = floatPreferencesKey("voice_volume")
-        val VOICE_BOOST = intPreferencesKey("voice_boost_db")
-        val GREETING = stringPreferencesKey("greeting")
-        val AI_GREETING = booleanPreferencesKey("ai_greeting")
-        val AUTO_SERVER = booleanPreferencesKey("auto_server")
-        val PROVIDER = stringPreferencesKey("provider")
     }
 }

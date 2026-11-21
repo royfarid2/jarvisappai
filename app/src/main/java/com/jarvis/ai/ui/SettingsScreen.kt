@@ -24,12 +24,7 @@ import com.jarvis.ai.JarvisNotificationListener
 import com.jarvis.ai.agent.JarvisAccessibilityService
 import com.jarvis.ai.assist.HotwordService
 import com.jarvis.ai.MainViewModel
-import com.jarvis.ai.data.FREELLM_ENDPOINT
-import com.jarvis.ai.data.GROQ_ENDPOINT
-import com.jarvis.ai.data.GROQ_MODEL
 import com.jarvis.ai.data.Settings
-import com.jarvis.ai.server.FreeLlmServer
-import com.jarvis.ai.server.ServerStatus
 
 private val LANGS = listOf("en-GB" to "English (UK)", "ar-IQ" to "Arabic (Iraqi)", "ar-SA" to "Arabic (Saudi)")
 
@@ -37,8 +32,6 @@ private val LANGS = listOf("en-GB" to "English (UK)", "ar-IQ" to "Arabic (Iraqi)
 fun SettingsScreen(vm: MainViewModel, current: Settings, onBack: () -> Unit) {
     var d by remember { mutableStateOf(current) }
     val voices by vm.tts.voices.collectAsState()
-    val serverStatus by vm.serverStatus.collectAsState()
-    LaunchedEffect(d.endpoint) { kotlinx.coroutines.delay(600); vm.refreshServer(d) }   // debounced while typing
     val ctx = LocalContext.current
     var confirmClear by remember { mutableStateOf(false) }
     var askNotif by remember { mutableStateOf(false) }
@@ -81,58 +74,8 @@ fun SettingsScreen(vm: MainViewModel, current: Settings, onBack: () -> Unit) {
             Spacer(Modifier.width(8.dp))
         }
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            Section("AI provider")
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(d.provider == "groq", { d = d.copy(provider = "groq", endpoint = GROQ_ENDPOINT, model = GROQ_MODEL, apiKey = d.groqKey) }, { Text("Groq") })
-                FilterChip(d.provider == "freellm", { d = d.copy(provider = "freellm", endpoint = FREELLM_ENDPOINT, model = "auto", apiKey = d.llmKey, autoStartServer = true) }, { Text("FreeLLMAPI") })
-            }
-            if (d.provider == "groq") {
-                OutlinedTextField(d.groqKey, { d = d.copy(groqKey = it, apiKey = it) }, Modifier.fillMaxWidth(),
-                    label = { Text("Groq API key") }, singleLine = true,
-                    supportingText = { Text("From console.groq.com/keys. No server needed.") })
-            }
-            if (d.provider == "freellm") {
-                OutlinedTextField(d.llmKey, { d = d.copy(llmKey = it, apiKey = it) }, Modifier.fillMaxWidth(),
-                    label = { Text("FreeLLMAPI unified key (freellmapi-...)") }, singleLine = true,
-                    supportingText = { Text("Printed by the setup command below. Starts automatically when you open JARVIS.") })
-                OutlinedButton({
-                    val cm = ctx.getSystemService(android.content.ClipboardManager::class.java)
-                    cm.setPrimaryClip(android.content.ClipData.newPlainText("JARVIS setup", vm.termuxSetupCommand()))
-                    vm.say("Copied. Open Termux, paste, press Enter.")
-                }, Modifier.fillMaxWidth()) { Text("Copy one-time Termux setup command") }
-                Text(
-                    "One time only: install Termux (from F-Droid), open it, paste the command and wait. It installs the server, starts it, creates the account " +
-                        "and prints your unified key (paste it above). Add a provider key such as Groq on the server's Keys page (http://127.0.0.1:3001). " +
-                        "After that JARVIS starts the server by itself every time you open it.",
-                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            Text("Advanced: custom endpoint / model", style = MaterialTheme.typography.titleMedium)
+            Section("AI connection")
             ConnectionFields(vm, d) { d = it }
-            val st = serverStatus
-            if (d.provider != "groq") Text(
-                when (st) {
-                    is ServerStatus.Online -> "FreeLLMAPI server: online (${st.latencyMs} ms)"
-                    is ServerStatus.Offline -> "FreeLLMAPI server: offline (${st.reason})"
-                    ServerStatus.Checking -> "FreeLLMAPI server: checking..."
-                    ServerStatus.Unknown -> "FreeLLMAPI server: not checked yet"
-                },
-                style = MaterialTheme.typography.bodyMedium,
-                color = if (st is ServerStatus.Online) Cyan else MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            if (d.provider != "groq") Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton({ vm.serverCommand("start") }, Modifier.weight(1f)) { Text("Start") }
-                OutlinedButton({ vm.serverCommand("stop") }, Modifier.weight(1f)) { Text("Stop") }
-                OutlinedButton({ vm.serverCommand("restart") }, Modifier.weight(1f)) { Text("Restart") }
-            }
-            SwitchRow("Auto-start and recover server", "Starts FreeLLMAPI in Termux when it is down and the endpoint is 127.0.0.1 (never starts a second copy).", d.autoStartServer) { d = d.copy(autoStartServer = it) }
-            Text(
-                "Start / Stop / Restart drive FreeLLMAPI inside Termux on this phone (see README, scripts/freellmapi-ctl.sh). " +
-                    "If FreeLLMAPI runs on a PC or Raspberry Pi, point the endpoint at it (http://<ip>:3001/v1): JARVIS then only monitors it and reconnects. " +
-                    "Provider API keys are added in the FreeLLMAPI dashboard (http://<host>:3001), never in this app. " +
-                    "Use the unified key from its Keys page as the API key above.",
-                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
 
             Section("Voice")
             SwitchRow("Speak responses", "JARVIS reads replies aloud as they appear", d.autoVoice) { d = d.copy(autoVoice = it) }
@@ -159,19 +102,6 @@ fun SettingsScreen(vm: MainViewModel, current: Settings, onBack: () -> Unit) {
             SliderRow("Speed", d.rate, 0.5f..1.5f) { d = d.copy(rate = it) }
             SliderRow("Pitch (lower = deeper)", d.pitch, 0.5f..1.5f) { d = d.copy(pitch = it) }
 
-            Section("Loudness")
-            SliderRow("Voice volume", d.voiceVolume, 0f..1f) { d = d.copy(voiceVolume = it) }
-            SliderRow("Extra gain (dB)  -  above about 6 may distort", d.voiceBoostDb.toFloat(), 0f..12f) { d = d.copy(voiceBoostDb = it.toInt()) }
-            OutlinedButton({
-                val am = ctx.getSystemService(android.media.AudioManager::class.java)
-                am.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, am.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC), android.media.AudioManager.FLAG_SHOW_UI)
-            }, Modifier.fillMaxWidth()) { Text("Set phone media volume to maximum") }
-            Text(
-                "Voice volume and extra gain are software settings and are saved. The phone's own volume is separate: Android never lets an app go past it, " +
-                    "so use this button (or the volume keys) for the hardware level. Tap Preview below to hear the result.",
-                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-
             Section("JARVIS voice (Fish Audio)")
             VoiceFields(d) { d = it }
             OutlinedButton({ vm.previewVoice(d) }, Modifier.fillMaxWidth()) { Text("Preview JARVIS voice") }
@@ -182,13 +112,6 @@ fun SettingsScreen(vm: MainViewModel, current: Settings, onBack: () -> Unit) {
                     "Detection is offline (Sherpa-ONNX) and runs on your phone; no account or key needed, and no audio is sent anywhere.",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            OutlinedTextField(
-                d.greeting, { d = d.copy(greeting = it) }, Modifier.fillMaxWidth(),
-                label = { Text("Spoken greeting") },
-                supportingText = { Text("Spoken live in JARVIS's voice on every wake, never a recording. Placeholders: {greeting} (morning/afternoon/evening), {time}, {date}") },
-            )
-            SwitchRow("Let the AI write the greeting", "Asks your model for a fresh line each time; falls back to the text above if it takes over 2.5 s.", d.aiGreeting) { d = d.copy(aiGreeting = it) }
-            OutlinedButton({ vm.previewGreeting(d) }, Modifier.fillMaxWidth()) { Text("Test greeting") }
             SwitchRow("Listen for \"Jarvis\"", "Keeps a small notification while listening. Uses the microphone, so the first start must happen with the app open.", d.hotword) { d = d.copy(hotword = it) }
             PermRow(
                 "Display over other apps", if (overlayOn) "Allowed" else "Required so the panel can appear over other apps",
