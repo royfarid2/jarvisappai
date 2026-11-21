@@ -22,6 +22,20 @@ fails over between free providers; install it on the phone with `scripts/termux-
 keys in its dashboard, and paste its unified `freellmapi-...` key here (model `auto`).
 Not done: starting/restarting the server from inside JARVIS and a server status indicator.
 
+## Memory
+Settings > Memory. JARVIS saves only what you explicitly tell it ("my name is Reda", "remember that my server is called GM",
+"I prefer short answers"; "forget that…" removes it), merges duplicates, replaces a changed name, and injects the saved
+facts into every conversation (newest first, capped). Memory manager: add, edit, delete, clear all, export (share as JSON),
+import (paste JSON). Not done: semantic/embedding retrieval (all saved facts are injected, fine for a few dozen).
+
+## Terminal and build tasks
+Settings > Terminal: a sandboxed workspace (app-private storage) with a real shell (toybox), live output, history, cancel,
+file listing and ZIP export to Downloads/JARVIS. In chat, an intent router (keyword pre-filter + a one-word AI classification)
+sends only real "create / build / run / zip" requests to the terminal agent; questions ("what is Python?", "explain this
+error") stay normal conversation. The agent plans, writes files, runs commands, checks the result, zips, and reports each real
+step live; destructive commands (rm, dd...) ask you first. Limits: no Python/Node/Git/compiler on the phone, so code can be
+written and zipped but not run here (Termux integration is not done); APK building is not possible in this environment.
+
 ## Chat, sessions and code
 - Multiple **chat sessions** (drawer): new chat, auto-titled, rename, delete; each keeps its own context.
 - Voice and text are **in sync**: each sentence's text types out as you hear it (Fish Audio synthesises the next

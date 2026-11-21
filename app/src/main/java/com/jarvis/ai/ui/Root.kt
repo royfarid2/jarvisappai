@@ -5,7 +5,10 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -36,12 +39,28 @@ fun JarvisRoot(vm: MainViewModel) {
                 else -> {
                     var booted by rememberSaveable { mutableStateOf(false) }
                     var showSettings by rememberSaveable { mutableStateOf(false) }
-                    BackHandler(showSettings) { showSettings = false }
+                    var showMemory by rememberSaveable { mutableStateOf(false) }
+                    var showTerminal by rememberSaveable { mutableStateOf(false) }
+                    BackHandler(showTerminal) { showTerminal = false }
+                    BackHandler(showMemory) { showMemory = false }
+                    val confirm by vm.confirmRequest.collectAsState()
+                    confirm?.let { what ->
+                        AlertDialog(
+                            onDismissRequest = { vm.answerConfirm(false) },
+                            title = { Text("Confirm") },
+                            text = { Text(what) },
+                            confirmButton = { TextButton({ vm.answerConfirm(true) }) { Text("Allow") } },
+                            dismissButton = { TextButton({ vm.answerConfirm(false) }) { Text("Decline") } },
+                        )
+                    }
+                    BackHandler(showSettings && !showMemory) { showSettings = false }
                     if (!booted) {
                         BootScreen { booted = true; vm.greet() }
                     } else {
                         Crossfade(showSettings, label = "screen") { settingsOpen ->
-                            if (settingsOpen) SettingsScreen(vm, st) { showSettings = false }
+                            if (settingsOpen && showTerminal) TerminalScreen(vm) { showTerminal = false }
+                            else if (settingsOpen && showMemory) MemoryScreen(vm) { showMemory = false }
+                            else if (settingsOpen) SettingsScreen(vm, st, openMemory = { showMemory = true }, openTerminal = { showTerminal = true }) { showSettings = false }
                             else ChatScreen(vm, st) { showSettings = true }
                         }
                     }

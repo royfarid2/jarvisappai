@@ -29,6 +29,15 @@ data class Settings(
     val onboarded: Boolean = false,
 )
 
+@Entity(tableName = "memories")
+data class MemoryEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val text: String,
+    val category: String,
+    val createdAt: Long,
+    val updatedAt: Long,
+)
+
 @Entity(tableName = "sessions")
 data class SessionEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
@@ -57,6 +66,12 @@ interface MessageDao {
     @Insert suspend fun insert(m: MessageEntity): Long
     @Insert suspend fun insertSession(s: SessionEntity): Long
     @Query("UPDATE sessions SET title = :t WHERE id = :id") suspend fun rename(id: Long, t: String)
+    @Query("SELECT * FROM memories ORDER BY updatedAt DESC") fun memories(): Flow<List<MemoryEntity>>
+    @Query("SELECT * FROM memories ORDER BY updatedAt DESC") suspend fun allMemories(): List<MemoryEntity>
+    @Insert suspend fun addMemory(m: MemoryEntity): Long
+    @Query("UPDATE memories SET text = :t, updatedAt = :ts WHERE id = :id") suspend fun updateMemory(id: Long, t: String, ts: Long)
+    @Query("DELETE FROM memories WHERE id = :id") suspend fun deleteMemory(id: Long)
+    @Query("DELETE FROM memories") suspend fun clearMemories()
     @Query("UPDATE sessions SET pinned = :v WHERE id = :id") suspend fun setPinned(id: Long, v: Boolean)
     @Query("UPDATE sessions SET archived = :v WHERE id = :id") suspend fun setArchived(id: Long, v: Boolean)
     @Query("SELECT DISTINCT sessionId FROM messages WHERE role IN ('user','assistant') AND content LIKE '%' || :q || '%'") suspend fun searchSessions(q: String): List<Long>
@@ -67,8 +82,14 @@ interface MessageDao {
     @Query("DELETE FROM sessions") suspend fun clearSessions()
 }
 
-@Database(entities = [MessageEntity::class, SessionEntity::class], version = 3, exportSchema = false)
+@Database(entities = [MessageEntity::class, SessionEntity::class, MemoryEntity::class], version = 4, exportSchema = false)
 abstract class AppDb : RoomDatabase() { abstract fun dao(): MessageDao }
+
+val MIGRATION_3_4 = object : androidx.room.migration.Migration(3, 4) {
+    override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+        db.execSQL("CREATE TABLE IF NOT EXISTS `memories` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `text` TEXT NOT NULL, `category` TEXT NOT NULL, `createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL)")
+    }
+}
 
 /** Keeps every existing chat: only adds the pin / archive flags. */
 val MIGRATION_2_3 = object : androidx.room.migration.Migration(2, 3) {

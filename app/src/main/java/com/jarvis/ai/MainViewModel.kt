@@ -57,6 +57,41 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val tts = TtsManager(appCtx) { s, t -> api.speech(s, t, appCtx.cacheDir) }
     val stt = SttManager(appCtx)
     private val agent = AgentRunner(appCtx, api) { tts.enqueue(it) }
+    private val terminal = com.jarvis.ai.terminal.TerminalEngine(appCtx)
+    private val terminalAgent = com.jarvis.ai.terminal.TerminalAgent(terminal, api)
+
+    // ----- confirmation for risky actions (shown as a dialog) -----
+    val confirmRequest = MutableStateFlow<String?>(null)
+    private var confirmWaiter: kotlinx.coroutines.CompletableDeferred<Boolean>? = null
+    fun answerConfirm(ok: Boolean) { confirmRequest.value = null; confirmWaiter?.complete(ok) }
+    private suspend fun askConfirm(what: String): Boolean {
+        val w = kotlinx.coroutines.CompletableDeferred<Boolean>()
+        confirmWaiter = w; confirmRequest.value = what
+        return try { w.await() } finally { confirmRequest.value = null }
+    }
+
+    // ----- manual terminal (Terminal screen) -----
+    val terminalLog = MutableStateFlow<List<com.jarvis.ai.terminal.TerminalEngine.Exec>>(emptyList())
+    val terminalLive = MutableStateFlow("")
+    val terminalRunning = MutableStateFlow(false)
+    fun runCommand(cmd: String) {
+        val c = cmd.trim()
+        if (c.isEmpty() || terminalRunning.value) return
+        viewModelScope.launch {
+            terminalRunning.value = true; terminalLive.value = ""
+            try {
+                if (terminal.refusal(c) == null && terminal.isDestructive(c) && !askConfirm("Run this destructive command?\n\n$c")) return@launch
+                terminal.run(c) { l -> terminalLive.value = (terminalLive.value + l + "\n").takeLast(6000) }
+            } finally { terminalRunning.value = false; terminalLive.value = ""; terminalLog.value = synchronized(terminal.history) { terminal.history.toList() } }
+        }
+    }
+    fun cancelCommand() = terminal.cancel()
+    fun exportWorkspaceZip(done: (String) -> Unit) {
+        viewModelScope.launch {
+            done(try { terminal.exportToDownloads(terminal.zipDir("", "workspace.zip")).let { "Saved to $it" } } catch (e: Exception) { "Export failed: ${e.message}" })
+        }
+    }
+    fun workspaceTree(): String = terminal.tree()
 
     val settings = MutableStateFlow<Settings?>(null)
 
@@ -171,6 +206,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
     fun newChat() = openSession(-1L)
     fun renameSession(id: Long, title: String) { viewModelScope.launch { if (title.isNotBlank()) dao.rename(id, title.trim().take(60)) } }
+    val memories = dao.memories().stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    fun addMemory(t: String) { viewModelScope.launch { if (t.isNotBlank()) com.jarvis.ai.data.MemoryEngine.learn(dao, "Remember that " + t.trim()) } }
+    fun editMemory(id: Long, t: String) { viewModelScope.launch { if (t.isNotBlank()) dao.updateMemory(id, t.trim(), System.currentTimeMillis()) } }
+    fun deleteMemory(id: Long) { viewModelScope.launch { dao.deleteMemory(id) } }
+    fun clearMemories() { viewModelScope.launch { dao.clearMemories() } }
+    fun exportMemories(): String = com.jarvis.ai.data.MemoryEngine.toJson(memories.value)
+    fun importMemories(json: String, done: (Int) -> Unit) { viewModelScope.launch { done(com.jarvis.ai.data.MemoryEngine.import(dao, json)) } }
+
     fun pinSession(id: Long, pinned: Boolean) { viewModelScope.launch { dao.setPinned(id, pinned) } }
     fun archiveSession(id: Long, archived: Boolean) {
         viewModelScope.launch { dao.setArchived(id, archived) }
@@ -206,6 +249,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun stopAll() {
         voiceSession = false
+        terminal.cancel()
         AgentControl.stop = true
         job?.cancel()
         tts.stop()
@@ -265,6 +309,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val (sid, isNew) = ensureSession(text)
         dao.insert(MessageEntity(sessionId = sid, role = "user", content = text))
         dao.touch(sid, System.currentTimeMillis())
+        try { com.jarvis.ai.data.MemoryEngine.learn(dao, text) } catch (e: Exception) { }   // explicit "remember…" statements only
         try {
             originAssist = assistOpen
             if (agentMode.value) { runAgent(text, s, sid); return }
@@ -282,6 +327,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 }
             }
             if (needsDeviceControl(text) && JarvisAccessibilityService.isEnabled(appCtx)) { runAgent(text, s, sid); return }
+            if (wantsBuild(text, s)) { runTerminalTask(text, s, sid); return }
             chat(s, sid, screen = false)
             if (isNew) titleFor(s, sid)
         } finally {
@@ -343,7 +389,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             history = history.dropLast(1) + ChatMsg("user", last.content + "\n\n[SCREEN CONTENT of app ${snap.pkg}]\n${snap.text}", shot)
             if (shot != null) useS = s.copy(model = s.visionModel)
         }
-        val msgs = listOf(ChatMsg("system", systemPrompt())) + history
+        val memBlock = try { com.jarvis.ai.data.MemoryEngine.promptBlock(dao.allMemories()) } catch (e: Exception) { "" }
+        val msgs = listOf(ChatMsg("system", systemPrompt() + memBlock)) + history
         val sb = StringBuilder()
         var cursor = 0
         var failed: String? = null
@@ -427,6 +474,46 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     // ---------- agent mode ----------
+    // ----- intent router: only real build / run / file tasks leave normal conversation -----
+    private val BUILD_HINT = Regex(
+        "(create|build|make|write|generate|develop|code|run|execute|zip|unzip|extract|compile|debug|fix|edit).{0,60}(app|application|project|script|program|website|site|bot|api|file|files|folder|code|zip|game|plugin)" +
+            "|(سوي|اعمل|أنشئ|انشئ|اكتب|ابني|برمج|شغل|نفذ|اضغط|فك).{0,60}(تطبيق|مشروع|سكربت|سكريبت|برنامج|موقع|بوت|ملف|ملفات|مجلد|كود|لعبة|بلجن|زيب)",
+        RegexOption.IGNORE_CASE)
+
+    private suspend fun wantsBuild(text: String, s: Settings): Boolean {
+        if (!BUILD_HINT.containsMatchIn(text)) return false
+        return try {
+            api.chatOnce(s, listOf(
+                ChatMsg("system", "Classify the user's message. Answer with exactly one word. BUILD = the user wants files or code to be created, edited, run or zipped right now. CHAT = a question, explanation, discussion, advice or anything else (for example 'what is Python', 'explain this error', 'how does X work'). Any language."),
+                ChatMsg("user", text.take(600)),
+            ), 12).trim().uppercase().startsWith("BUILD")
+        } catch (e: CancellationException) { throw e } catch (e: Exception) { false }
+    }
+
+    private suspend fun runTerminalTask(task: String, s: Settings, sid: Long) {
+        val steps = ArrayList<String>()
+        val t0 = System.currentTimeMillis()
+        streaming.value = "```\nPlanning…\n```"
+        val result = try {
+            terminalAgent.run(task, s, { line ->
+                steps.add(line)
+                streaming.value = "```\n" + steps.takeLast(40).joinToString("\n") + "\n```"
+            }, { cmd -> askConfirm("JARVIS wants to run a destructive command in its workspace:\n\n$cmd") })
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            "The task stopped: ${e.message}"
+        } finally {
+            terminal.cancel()
+            withContext(NonCancellable) { streaming.value = null }
+        }
+        val secs = (System.currentTimeMillis() - t0) / 1000
+        val text = result + if (steps.isNotEmpty()) "\n\n```steps\n" + steps.joinToString("\n") + "\nfinished in ${secs}s\n```" else ""
+        dao.insert(MessageEntity(sessionId = sid, role = "assistant", content = text))
+        if (s.autoVoice) tts.enqueue(cleanForSpeech(result))
+        if (!JarvisApp.foreground) Notifier.post(appCtx, "JARVIS", result.take(140))
+    }
+
     private suspend fun runAgent(task: String, s: Settings, sid: Long) {
         if (!JarvisAccessibilityService.isEnabled(appCtx)) {
             dao.insert(MessageEntity(sessionId = sid, role = "note", content = "Agent mode needs the JARVIS accessibility service. Enable it in Settings > Permissions and try again."))

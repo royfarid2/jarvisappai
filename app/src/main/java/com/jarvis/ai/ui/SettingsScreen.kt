@@ -29,7 +29,7 @@ import com.jarvis.ai.data.Settings
 private val LANGS = listOf("en-GB" to "English (UK)", "ar-IQ" to "Arabic (Iraqi)", "ar-SA" to "Arabic (Saudi)")
 
 @Composable
-fun SettingsScreen(vm: MainViewModel, current: Settings, onBack: () -> Unit) {
+fun SettingsScreen(vm: MainViewModel, current: Settings, openMemory: () -> Unit = {}, openTerminal: () -> Unit = {}, onBack: () -> Unit) {
     var d by remember { mutableStateOf(current) }
     val voices by vm.tts.voices.collectAsState()
     val ctx = LocalContext.current
@@ -101,6 +101,15 @@ fun SettingsScreen(vm: MainViewModel, current: Settings, onBack: () -> Unit) {
             }
             SliderRow("Speed", d.rate, 0.5f..1.5f) { d = d.copy(rate = it) }
             SliderRow("Pitch (lower = deeper)", d.pitch, 0.5f..1.5f) { d = d.copy(pitch = it) }
+
+            Section("Memory")
+            val memCount by vm.memories.collectAsState()
+            Text("JARVIS remembers what you ask it to (\"my name is…\", \"remember that…\", \"I prefer…\"), never whole conversations.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            OutlinedButton(openMemory, Modifier.fillMaxWidth()) { Text("Manage memory (${memCount.size} saved)") }
+
+            Section("Terminal")
+            Text("A sandboxed workspace where JARVIS creates files, runs shell commands and zips projects. Ask it to build something and it works here; you can also run commands yourself.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            OutlinedButton(openTerminal, Modifier.fillMaxWidth()) { Text("Open terminal") }
 
             Section("JARVIS voice (Fish Audio)")
             VoiceFields(d) { d = it }
